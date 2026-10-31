@@ -202,7 +202,7 @@ echo.
 echo   Частые причины:
 echo     - JDK новее 25. Gradle 9.3.1 на такой JDK падает как раз с «plugin
 echo       ... was not found», хотя плагин на месте. Нужен JDK 17:
-echo         winget install EclipseAdoptium.Temurin.17
+echo         winget install -e --id EclipseAdoptium.Temurin.17.JDK
 echo       затем перезапустите скрипт; свою JDK можно указать явно:
 echo         build-apk.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17"
 echo     - Maven Central или портал плагинов не открываются — выше будет
@@ -229,7 +229,7 @@ goto fail_silent
 :no_java
 echo     JDK не найден.
 echo.
-echo   Нужен JDK 17: winget install EclipseAdoptium.Temurin.17
+echo   Нужен JDK 17: winget install -e --id EclipseAdoptium.Temurin.17.JDK
 echo   После установки откройте новую консоль — старая новых переменных не
 echo   увидит — либо задайте JAVA_HOME на папку с bin\java.exe.
 echo   Полная установка инструментов: tools\setup_android_tools.ps1

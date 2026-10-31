@@ -10,7 +10,7 @@ Write-Host "=== Starting Android SDK & JDK Setup for NovaAndroid ===" -Foregroun
 Write-Host "`n[1/5] Installing OpenJDK 17..." -ForegroundColor Yellow
 if (Get-Command winget -ErrorAction SilentlyContinue) {
     Write-Host "Using winget to install Temurin JDK 17..."
-    winget install --id EclipseAdoptium.Temurin.17 --silent --accept-package-agreements --accept-source-agreements
+    winget install --id EclipseAdoptium.Temurin.17.JDK --silent --accept-package-agreements --accept-source-agreements
 } else {
     Write-Host "winget not found. Please install JDK 17 manually or install winget." -ForegroundColor Red
     exit

@@ -66,6 +66,10 @@ Plugin [id: 'org.jetbrains.kotlin.android', version: '2.2.10', apply: false] was
 
 `build-apk.bat` версию читает и, если `java` в PATH новее 25, ищет на машине
 подходящую JDK (17 или 21 — в том числе `jbr` из Android Studio) и собирает ею.
+
+Скачать JDK 17: https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x64&package=jdk
+(MSI ставит его в `C:\Program Files\Eclipse Adoptium\jdk-17…`, откуда скрипт его и
+находит). Короче — `winget install -e --id EclipseAdoptium.Temurin.17.JDK`.
 Свою JDK можно указать явно: `build-apk.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17"`.
 
 Путь к SDK задаётся файлом `local.properties` в корне проекта:
