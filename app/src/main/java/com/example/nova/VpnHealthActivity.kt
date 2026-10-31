@@ -36,6 +36,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * Экран «Частный DNS», Android 9 и новее.
+ *
+ * `Settings.ACTION_PRIVATE_DNS_SETTINGS` в SDK помечен `@hide` (`@SystemApi`):
+ * система по этому действию экран открывает, а компилятор константы не видит.
+ * Держим строку сами — значение стабильно с Android 9. Если экрана нет (урезанная
+ * прошивка), [openSystem] уйдёт на общий экран настроек и скажет об этом.
+ */
+private const val ACTION_PRIVATE_DNS_SETTINGS = "android.settings.PRIVATE_DNS_SETTINGS"
+
+/**
  * Экран «Почему VPN не работает»: причины, по которым Nova не подключается или
  * теряет туннель, и кнопка системного экрана к каждой.
  *
@@ -337,7 +347,7 @@ class VpnHealthActivity : AppCompatActivity() {
             )
             VpnHealthAudit.Fix.PRIVATE_DNS -> openSystem(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    Settings.ACTION_PRIVATE_DNS_SETTINGS
+                    ACTION_PRIVATE_DNS_SETTINGS
                 } else {
                     Settings.ACTION_WIRELESS_SETTINGS
                 },

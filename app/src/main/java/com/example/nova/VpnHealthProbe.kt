@@ -1,6 +1,5 @@
 package com.example.nova
 
-import android.app.ActivityManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -36,6 +35,17 @@ object VpnHealthProbe {
 
     /** Сколько миллисекунд служба находится в текущем состоянии. */
     private const val STATE_AGE_UNKNOWN = 0L
+
+    /**
+     * Полосы ожидания приложения (`getAppStandbyBucket`).
+     *
+     * В SDK константы `STANDBY_BUCKET_*` помечены `@hide`: у `ActivityManager` их
+     * не видит компилятор, а у `UsageStatsManager` — тоже. Значения заданы
+     * документацией полос и не менялись с Android 9; сравниваем числами, потому
+     * что имя константы для нас важнее её видимости.
+     */
+    private const val STANDBY_BUCKET_ACTIVE = 10
+    private const val STANDBY_BUCKET_RARE = 40
 
     fun collect(context: Context): VpnHealthAudit.Facts {
         val app = context.applicationContext ?: context
@@ -253,8 +263,8 @@ object VpnHealthProbe {
             context.getSystemService(UsageStatsManager::class.java)
         }.getOrNull() ?: return false
         val bucket = runCatching { usage.appStandbyBucket }
-            .getOrDefault(ActivityManager.STANDBY_BUCKET_ACTIVE)
-        return bucket >= ActivityManager.STANDBY_BUCKET_RARE
+            .getOrDefault(STANDBY_BUCKET_ACTIVE)
+        return bucket >= STANDBY_BUCKET_RARE
     }
 
     private fun notificationPermissionGranted(context: Context): Boolean {
