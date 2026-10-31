@@ -37,6 +37,7 @@ set "TYPE_TASK=Debug"
 set "CLEAN_TASK="
 set "EXTRA_FLAGS="
 set "DO_INSTALL=0"
+set "JDK_ARG="
 set "START_TIME=%TIME%"
 
 cd /d "%~dp0"
@@ -57,6 +58,8 @@ if /i "%~1"=="/clean" (set "CLEAN_TASK=clean" & shift & goto args)
 if /i "%~1"=="/fast" (set "EXTRA_FLAGS=%EXTRA_FLAGS% -PnovaFastBuild" & shift & goto args)
 if /i "%~1"=="/diag" (set "EXTRA_FLAGS=%EXTRA_FLAGS% -PnovaDiagnostics" & shift & goto args)
 if /i "%~1"=="/install" (set "DO_INSTALL=1" & shift & goto args)
+if /i "%~1"=="/jdk" (set "JDK_ARG=%~2" & shift & shift & goto args)
+if /i "%~1"=="/trace" (set "EXTRA_FLAGS=%EXTRA_FLAGS% --stacktrace" & shift & goto args)
 echo.
 echo   Неизвестный ключ: %~1
 goto usage
@@ -68,14 +71,35 @@ echo   ---------------
 echo   вариант: %FLAVOR%, тип: %TYPE%
 
 rem --- 1. JDK ----------------------------------------------------------------
+rem Версию проверяем не из вредности: Gradle 9.3.1 запускается на JDK 17-25
+rem (JDK 26 — это Gradle 9.4, JDK 27 — 9.8), а на более новом падает на
+rem разрешении плагинов с невнятным «plugin ... was not found». Проекту нужен
+rem JDK 17, поэтому при чужой версии ищем подходящую рядом и берём её.
 echo.
 echo [1/3] Проверяю JDK
 set "JAVA_EXE=java"
-if exist "%JAVA_HOME%\bin\java.exe" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
+if defined JDK_ARG set "JAVA_EXE=%JDK_ARG%\bin\java.exe"
+if defined JDK_ARG set "JAVA_HOME=%JDK_ARG%"
+if not defined JDK_ARG if exist "%JAVA_HOME%\bin\java.exe" set "JAVA_EXE=%JAVA_HOME%\bin\java.exe"
 "%JAVA_EXE%" -version >nul 2>nul
 if errorlevel 1 goto no_java
+call :read_java_version
 echo     %JAVA_EXE%
 "%JAVA_EXE%" -version 2>&1 | findstr /i /c:"version"
+if not defined JAVA_MAJOR goto jdk_ok
+if %JAVA_MAJOR% GEQ 17 if %JAVA_MAJOR% LEQ 25 goto jdk_ok
+echo     JDK %JAVA_MAJOR% не подходит: Gradle 9.3.1 работает на JDK 17-25.
+call :find_jdk
+if not defined JDK_FOUND goto jdk_ok
+echo     Беру подходящую JDK с этой машины: %JDK_FOUND%
+set "JAVA_HOME=%JDK_FOUND%"
+set "JAVA_EXE=%JDK_FOUND%\bin\java.exe"
+call :read_java_version
+if not defined JAVA_MAJOR goto jdk_ok
+if %JAVA_MAJOR% GEQ 17 if %JAVA_MAJOR% LEQ 25 goto jdk_ok
+echo     Она тоже вне диапазона (JDK %JAVA_MAJOR%) — пробую сборку всё равно.
+
+:jdk_ok
 
 rem --- 2. Android SDK --------------------------------------------------------
 rem Gradle берёт путь к SDK из ANDROID_HOME либо из local.properties в корне.
@@ -162,6 +186,36 @@ if defined COPY echo   Копия:  %COPY%
 goto finish_ok
 
 rem --- ошибки ---------------------------------------------------------------
+:build_failed
+echo.
+echo   Gradle завершился с ошибкой. Проверяю, что видно с этой машины:
+echo.
+where curl >nul 2>nul
+if errorlevel 1 (
+    echo     curl не найден — проверку доступа к репозиториям пропускаю
+) else (
+    call :probe "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.1.0/gradle-9.1.0.pom" "Google Maven — dl.google.com"
+    call :probe "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin/2.2.10/kotlin-gradle-plugin-2.2.10.pom" "Maven Central — repo1.maven.org"
+    call :probe "https://plugins.gradle.org/m2/org/jetbrains/kotlin/android/org.jetbrains.kotlin.android.gradle.plugin/2.2.10/org.jetbrains.kotlin.android.gradle.plugin-2.2.10.pom" "портал плагинов — plugins.gradle.org"
+)
+echo.
+echo   Частые причины:
+echo     - JDK новее 25. Gradle 9.3.1 на такой JDK падает как раз с «plugin
+echo       ... was not found», хотя плагин на месте. Нужен JDK 17:
+echo         winget install EclipseAdoptium.Temurin.17
+echo       затем перезапустите скрипт; свою JDK можно указать явно:
+echo         build-apk.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17"
+echo     - Maven Central или портал плагинов не открываются — выше будет
+echo       НЕДОСТУПЕН. Помогает VPN или прокси, прописанный в
+echo       %USERPROFILE%\.gradle\gradle.properties:
+echo         systemProp.https.proxyHost=... systemProp.https.proxyPort=...
+echo     - Android SDK не найден: docs\BUILD.md, «Что должно быть установлено».
+echo     - Выпуск: нет keystore.properties либо ключ релея выписан на другую
+echo       версию, см. docs\BUILD.md, «Подпись релиза» и «Ключ релея».
+echo.
+echo   Подробный вывод: build-apk.bat /trace   (добавляет --stacktrace)
+goto fail_silent
+
 :no_folder
 echo   Не удалось перейти в папку скрипта: %~dp0
 goto fail_silent
@@ -179,20 +233,6 @@ echo   Нужен JDK 17: winget install EclipseAdoptium.Temurin.17
 echo   После установки откройте новую консоль — старая новых переменных не
 echo   увидит — либо задайте JAVA_HOME на папку с bin\java.exe.
 echo   Полная установка инструментов: tools\setup_android_tools.ps1
-goto fail_silent
-
-:build_failed
-echo.
-echo   Gradle завершился с ошибкой. Частые причины:
-echo     - JDK не 17: сверьтесь со строкой версии выше;
-echo     - SDK не найден: docs\BUILD.md, «Что должно быть установлено»;
-echo     - выпуск: нет keystore.properties либо ключ релея выписан на другую
-echo       версию, см. docs\BUILD.md, «Подпись релиза» и «Ключ релея».
-echo.
-echo   Быстрая проверочная сборка без R8 и lint:  build-apk.bat /release /fast
-echo   Сборка со стороны, без выпускных секретов:
-echo       set NOVA_ALLOW_UNSIGNED_RELEASE=1
-echo       set NOVA_ALLOW_UNPUBLISHABLE_BUILD=1
 goto fail_silent
 
 :no_apk
@@ -235,6 +275,9 @@ echo     /clean     сначала очистить прошлую сборку
 echo     /fast      без R8 и lint: быстро, но такой APK не публикуют
 echo     /diag      добавить экран самодиагностики
 echo     /install   установить готовый APK на устройство через adb
+echo     /jdk ПУТЬ  собрать этой JDK, например /jdk "C:\Program Files\Eclipse
+echo                Adoptium\jdk-17"; нужно, когда java в PATH новее 25
+echo     /trace     добавить --stacktrace для разбора падений
 echo     /help      эта справка
 echo.
 echo   Готовый файл остаётся в app\build\outputs\apk и копируется в out\.
@@ -246,3 +289,49 @@ echo.
 chcp %OLD_CP% >nul 2>nul
 endlocal
 exit /b 0
+
+rem --- вспомогательное ------------------------------------------------------
+rem До сюда управление доходит только через call.
+
+:read_java_version
+rem Ставит JAVA_MAJOR по выводу java -version. Пишем в файл: у самого вывода
+rem кавычки, а путь к java.exe может содержать пробелы.
+set "JAVA_MAJOR="
+set "JAVA_RAW="
+set "JAVA_VER_FILE=%TEMP%\nova-java-version.txt"
+"%JAVA_EXE%" -version 2>"%JAVA_VER_FILE%" >nul
+for /f "tokens=3" %%v in ('findstr /i /c:"version" "%JAVA_VER_FILE%"') do set "JAVA_RAW=%%~v"
+del "%JAVA_VER_FILE%" >nul 2>nul
+if not defined JAVA_RAW goto :eof
+for /f "tokens=1 delims=." %%m in ("%JAVA_RAW%") do set "JAVA_MAJOR=%%m"
+if "%JAVA_MAJOR%"=="1" set "JAVA_MAJOR=8"
+goto :eof
+
+:find_jdk
+rem Ищет установленную JDK 17 или 21: у Android Studio своя (jbr), у остальных
+rem — Adoptium, Oracle или Microsoft.
+set "JDK_FOUND="
+for /d %%d in ("%PROGRAMFILES%\Eclipse Adoptium\jdk-17*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%PROGRAMFILES%\Java\jdk-17*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%PROGRAMFILES%\Microsoft\jdk-17*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%LOCALAPPDATA%\Programs\Eclipse Adoptium\jdk-17*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%PROGRAMFILES%\Eclipse Adoptium\jdk-21*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%PROGRAMFILES%\Java\jdk-21*") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%PROGRAMFILES%\Android\Android Studio\jbr") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+if defined JDK_FOUND goto :eof
+for /d %%d in ("%LOCALAPPDATA%\Programs\Android Studio\jbr") do if exist "%%~fd\bin\java.exe" set "JDK_FOUND=%%~fd"
+goto :eof
+
+:probe
+rem Однострочные if, а не блок: подпись подставляется в echo, и скобка из
+rem подстановки закрыла бы блок раньше времени.
+curl -s -f -o nul -m 12 "%~1" >nul 2>nul
+if errorlevel 1 echo     %~2 — НЕДОСТУПЕН
+if not errorlevel 1 echo     %~2 — ok
+goto :eof

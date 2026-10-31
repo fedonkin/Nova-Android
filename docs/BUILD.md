@@ -56,6 +56,18 @@ Gradle, что описаны ниже.
 Gradle, Android Gradle Plugin 9.1.0 и Kotlin 2.2.10 подтягиваются автоматически, ставить
 их отдельно не нужно.
 
+Версия JDK важнее, чем кажется: сам Gradle 9.3.1 запускается только на JDK 17–25
+(JDK 26 требует Gradle 9.4, JDK 27 — 9.8). На более новой JDK сборка падает не с
+понятным «нужен другой Gradle», а на разрешении плагинов:
+
+```
+Plugin [id: 'org.jetbrains.kotlin.android', version: '2.2.10', apply: false] was not found
+```
+
+`build-apk.bat` версию читает и, если `java` в PATH новее 25, ищет на машине
+подходящую JDK (17 или 21 — в том числе `jbr` из Android Studio) и собирает ею.
+Свою JDK можно указать явно: `build-apk.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17"`.
+
 Путь к SDK задаётся файлом `local.properties` в корне проекта:
 
 ```properties
