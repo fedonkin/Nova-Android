@@ -561,6 +561,11 @@ class MainActivity : AppCompatActivity() {
      * показывать «РЕГИСТРАЦИЯ PROTON...» или процент регистрации устройства.
      */
     private var connectingBaseText = ""
+    /**
+     * Этап подключения, о котором сообщила служба: «транспорт», «рукопожатие»,
+     * «проба». Пусто — служба этапов не называла (или подключения нет).
+     */
+    private var connectStageKey = ""
     private val startFlowGeneration = AtomicInteger(0)
     private var lastDeadConnectingRecoveryAtMs = 0L
 
@@ -611,6 +616,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Этап подключения от службы. Служба ставит метку в момент, когда шаг
+     * действительно начался, а экран узнаёт об этом, не дожидаясь следующего
+     * опроса состояния.
+     */
+    private val vpnStageReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent == null || intent.action != NovaVpnService.ACTION_VPN_STAGE) return
+            val stage = intent.getStringExtra(NovaVpnService.EXTRA_CONNECT_STAGE).orEmpty()
+            if (stage == connectStageKey) return
+            connectStageKey = stage
+            refreshConnectingElapsedText()
+        }
+    }
+
     private val vpnStateReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: Intent?) {
             if (intent?.action == NovaVpnService.ACTION_VPN_STATE) {
@@ -648,6 +668,9 @@ class MainActivity : AppCompatActivity() {
                     NovaVpnService.STATE_CONNECTING
                 } else {
                     state
+                }
+                if (intent.hasExtra(NovaVpnService.EXTRA_CONNECT_STAGE)) {
+                    connectStageKey = intent.getStringExtra(NovaVpnService.EXTRA_CONNECT_STAGE).orEmpty()
                 }
                 updateUiByState(effectiveState)
                 updateAttemptProgressDisplay()
@@ -1697,6 +1720,12 @@ class MainActivity : AppCompatActivity() {
         } else {
              registerReceiver(vpnStateReceiver, filter)
         }
+        val stageFilter = android.content.IntentFilter(NovaVpnService.ACTION_VPN_STAGE)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+             registerReceiver(vpnStageReceiver, stageFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+             registerReceiver(vpnStageReceiver, stageFilter)
+        }
         val doomedFilter = android.content.IntentFilter(NovaVpnService.ACTION_VPN_PROCESS_DOOMED)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
              registerReceiver(vpnProcessDoomedReceiver, doomedFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
@@ -1721,6 +1750,7 @@ class MainActivity : AppCompatActivity() {
         super.onStop()
         if (::ivBackgroundArt.isInitialized) ivBackgroundArt.setDiveEnabled(false)
         try { unregisterReceiver(vpnStateReceiver) } catch (e: Exception) {}
+        try { unregisterReceiver(vpnStageReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(vpnProcessDoomedReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(warpDiscoveryReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(updateStateReceiver) } catch (_: Exception) {}
@@ -5553,9 +5583,16 @@ class MainActivity : AppCompatActivity() {
         val seconds = ConnectElapsed.secondsOrNull(
             startedAtMs = connectingStartedAtMs,
             nowMs = SystemClock.elapsedRealtime(),
-        ) ?: return text
+        )
+        val stage = ConnectStageLabel.label(connectStageKey)
+        if (seconds == null && stage.isEmpty()) return text
         connectingBaseText = text
-        return "$text · ${NovaLanguage.tr(this, "{0} с").replace("{0}", seconds.toString())}"
+        val parts = ArrayList<String>(2)
+        if (stage.isNotEmpty()) parts.add(stage)
+        if (seconds != null) {
+            parts.add(NovaLanguage.tr(this, "{0} с").replace("{0}", seconds.toString()))
+        }
+        return "$text · ${parts.joinToString(" · ")}"
     }
 
     /**
@@ -5567,6 +5604,9 @@ class MainActivity : AppCompatActivity() {
      * здесь не годится — она снимает и вешает сеть и сбрасывает показания.
      */
     private fun refreshConnectingElapsedText() {
+        // Этап и секунды имеют смысл только пока подключение идёт: сообщение об
+        // этапе может прийти уже после CONNECTED, и затирать «ПОДКЛЮЧЕНО» нельзя.
+        if (vpnState != NovaVpnService.STATE_CONNECTING) return
         // Идёт регистрация устройства — экран показывает её процент, и перебивать
         // его секундами нельзя.
         if (applyDeviceRegistrationStatusIfActive()) return
@@ -6367,6 +6407,7 @@ class MainActivity : AppCompatActivity() {
     ) {
         connectingStartedAtMs = 0L
         connectingBaseText = ""
+        connectStageKey = ""
         manualStopUiSuppressedUntilMs = 0L
         primaryActionPreviewActive = false
         if (!connectedUiAwaitingProof || lastTunnelConnectedAtMs == 0L) {
@@ -6528,6 +6569,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderStoppedState() {
         connectingStartedAtMs = 0L
         connectingBaseText = ""
+        connectStageKey = ""
         releaseVpnNetwork()
         setBackdropStopped()
         ipRefreshGeneration.incrementAndGet()

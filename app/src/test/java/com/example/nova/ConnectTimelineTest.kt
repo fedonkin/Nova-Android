@@ -67,6 +67,19 @@ class ConnectTimelineTest {
     }
 
     @Test
+    fun `elapsedMsOrNull считает ход замера и молчит без него`() {
+        ConnectTimeline.discard()
+        assertTrue(ConnectTimeline.elapsedMsOrNull() == null)
+
+        ConnectTimeline.begin("warp")
+        now = 2_500
+        assertEquals(2_500L, ConnectTimeline.elapsedMsOrNull())
+
+        ConnectTimeline.finish("подключено")
+        assertTrue(ConnectTimeline.elapsedMsOrNull() == null)
+    }
+
+    @Test
     fun `hasPending различает начатый и закрытый замер`() {
         ConnectTimeline.discard()
         assertTrue(!ConnectTimeline.hasPending())

@@ -71,6 +71,17 @@ object ConnectTimeline {
         }
     }
 
+    /**
+     * Сколько идёт текущий замер, или `null`, если он не начат.
+     *
+     * Нужен тем, кто показывает ход подключения на экране: у них нет своего
+     * начала отсчёта, а замер уже знает его точнее (он стартует раньше, чем
+     * экран получает первую метку).
+     */
+    fun elapsedMsOrNull(): Long? = synchronized(lock) {
+        if (startedAtMs == 0L) null else (timeSource() - startedAtMs).coerceAtLeast(0L)
+    }
+
     /** Идёт ли замер. Нужен тем, кто печатает итог только при незакрытом замере. */
     fun hasPending(): Boolean = synchronized(lock) { startedAtMs != 0L }
 
