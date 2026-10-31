@@ -404,6 +404,47 @@ class ClientData(context: Context) {
         WARP_VERIFIED_EXPORT_FILE_NAME,
     )
 
+    /**
+     * Разобранное состояние службы вместе с отметкой файла.
+     *
+     * Экран спрашивает одно и то же состояние по нескольку раз за такт:
+     * [saveServiceState] пишет сюда, а читают его снимок экрана (четыре поля
+     * по отдельности), проверки живости и расчёт задержки следующего опроса.
+     * Каждый вопрос раньше читал `service_state.json` и разбирал JSON заново —
+     * на главном потоке, раз в секунду, пока идёт подключение.
+     */
+    private val serviceStateCache = FileStampCache(
+        read = { readServiceStateFileUncached() },
+        stamp = { fileStampOf(serviceStateFile) },
+        maxAgeMs = FILE_CACHE_MAX_AGE_MS,
+    )
+
+    /**
+     * Разобранный снимок перебора точек входа, с той же отметкой файла.
+     *
+     * Его читает каждый такт экрана (`refreshWarpDiscoverySnapshotFromStorage`),
+     * а `:vpn` пишет раз в несколько секунд: без кэша на такт приходились чтение
+     * файла и разбор JSON ради ответа «ничего не изменилось».
+     */
+    private val warpDiscoverySnapshotCache = FileStampCache(
+        read = { parseWarpDiscoverySnapshot() },
+        stamp = { fileStampOf(warpDiscoveryStateFile) },
+        maxAgeMs = FILE_CACHE_MAX_AGE_MS,
+    )
+
+    /**
+     * Отметка файла для [FileStampCache]; `null` — файла нет или он пуст.
+     *
+     * Пустой файл в кэш не годится: читатель обязан в этом случае спросить
+     * резервную копию и настройки, а они меняются без всякой отметки.
+     */
+    private fun fileStampOf(file: AtomicFile): FileStamp? {
+        val base = file.baseFile
+        val length = base.length()
+        val modifiedAtMs = base.lastModified()
+        return if (length > 0L && modifiedAtMs > 0L) FileStamp(length, modifiedAtMs) else null
+    }
+
     private fun normalizeReservedValue(value: String?): String? {
         val trimmed = value?.trim().orEmpty()
         if (trimmed.isBlank()) return null
@@ -1205,7 +1246,9 @@ class ClientData(context: Context) {
     fun getServiceAttemptTotal(): Int =
         readServiceStateFile().optInt("attempt_total", -1).takeIf { it >= 0 }
             ?: prefs.getInt("service_attempt_total", 0)
-    // Кэш числа попыток удалён намеренно, восстанавливать не нужно.
+    // Кэш числа попыток удалён намеренно, восстанавливать не нужно. (Речь о кэше
+    // значений в настройках, а не о разборе файла: файл разбирается один раз на
+    // такт, см. serviceStateCache, и это ничего не откатывает.)
     //
     // Он лежал в SharedPreferences и писался только процессом `:vpn`, а читался в
     // том числе процессом UI — который в MODE_PRIVATE чужие записи не перечитывает
@@ -4214,6 +4257,7 @@ class ClientData(context: Context) {
             stream.write(payload)
             stream.flush()
             serviceStateFile.finishWrite(stream)
+            serviceStateCache.invalidate()
         } catch (_: Exception) {
             serviceStateFile.failWrite(stream)
         }
@@ -4243,7 +4287,18 @@ class ClientData(context: Context) {
             .orEmpty()
     }
 
-    private fun readServiceStateFile(): JSONObject {
+    /**
+     * Разобранное состояние службы.
+     *
+     * Возвращается **общий** объект: тот же, что получил предыдущий читатель с тем
+     * же файлом. Менять его нельзя — это не копия. Читать (`optString`, `optInt`,
+     * `has`) можно из любого потока: изменений в нём не бывает, `JSONObject`
+     * подменяется целиком, когда меняется файл.
+     */
+    private fun readServiceStateFile(): JSONObject = serviceStateCache.get()
+
+    /** Разбор без кэша: зовётся только из [serviceStateCache]. */
+    private fun readServiceStateFileUncached(): JSONObject {
         return try {
             val raw = readAtomicFileText(serviceStateFile)
             if (raw.isBlank()) JSONObject() else JSONObject(raw)
@@ -4291,6 +4346,7 @@ class ClientData(context: Context) {
             stream.write(payload)
             stream.flush()
             warpDiscoveryStateFile.finishWrite(stream)
+            warpDiscoverySnapshotCache.invalidate()
         } catch (_: Exception) {
             warpDiscoveryStateFile.failWrite(stream)
         }
@@ -4892,9 +4948,15 @@ class ClientData(context: Context) {
         val raw = snapshot.toString()
         prefs.edit().putString("warp_discovery_snapshot", raw).commit()
         writeWarpDiscoveryStateFile(raw)
+        // Файл мог не записаться, а настройки записались: снимок в кэше тогда
+        // говорил бы о прошлом переборе.
+        warpDiscoverySnapshotCache.invalidate()
     }
 
-    fun getWarpDiscoverySnapshot(): WarpDiscoverySnapshot? {
+    fun getWarpDiscoverySnapshot(): WarpDiscoverySnapshot? = warpDiscoverySnapshotCache.get()
+
+    /** Разбор без кэша: зовётся только из [warpDiscoverySnapshotCache]. */
+    private fun parseWarpDiscoverySnapshot(): WarpDiscoverySnapshot? {
         val raw = readWarpDiscoveryStateFile().takeIf { it.isNotBlank() }
             ?: prefs.getString("warp_discovery_snapshot", null).orEmpty()
         if (raw.isBlank()) return null
@@ -9445,6 +9507,15 @@ class ClientData(context: Context) {
 
     companion object {
         private val runtimeSeedInitDone = AtomicBoolean(false)
+
+        /**
+         * Сколько живёт разобранный файл состояния и снимок перебора.
+         *
+         * Меньше такта экрана (1000 мс на подключении): внутри такта все вопросы
+         * получают один разбор, а к следующему такту значение перечитывается
+         * всегда — даже если отметка файла почему-то не сдвинулась.
+         */
+        private const val FILE_CACHE_MAX_AGE_MS = 900L
         private val warpVerifiedExportCacheLock = Any()
 
         /**
