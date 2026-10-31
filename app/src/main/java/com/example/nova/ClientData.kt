@@ -324,6 +324,19 @@ data class WarpVerifiedConfig(
 
 class ClientData(context: Context) {
     private val appContext = context.applicationContext
+    /**
+     * Зеркало настроек и показаний. Правило записи — по назначению значения:
+     *
+     *  * **настройка** (выбор человека, флаг «первый запуск», адрес шлюза) —
+     *    `commit()`: она обязана пережить даже `exit(-1)` из `tun2proxy_stop`;
+     *  * **показание** (состояние службы, снимок экрана, кэш на 30 секунд) и
+     *    **срок** («ждём до») — `apply()`: у показания рядом лежит файл, а срок
+     *    живёт секунды. Синхронная запись на диск здесь ничего не сохраняет, зато
+     *    случается на каждом тике состояния — то есть в главном потоке.
+     *
+     * `apply()` обновляет карту в процессе сразу, как и `commit()`; отложена только
+     * запись на диск, а `SharedPreferences` дописывает её до остановки компонентов.
+     */
     private val prefs: SharedPreferences = context.getSharedPreferences("nova_warp_config", Context.MODE_PRIVATE)
     private val serviceStateFile = AtomicFile(File(appContext.filesDir, "service_state.json"))
     private val warpDiscoveryStateFile = AtomicFile(File(appContext.filesDir, "warp_discovery_state.json"))
@@ -1110,7 +1123,7 @@ class ClientData(context: Context) {
         }
         val normalizedNotice = notice.trim()
         val now = System.currentTimeMillis()
-        prefs.edit()
+        val stateEditor = prefs.edit()
             .putString("service_state", normalizedState)
             .putString("service_backend", normalizedBackend)
             .putString("service_transport", normalizedTransport)
@@ -1118,13 +1131,11 @@ class ClientData(context: Context) {
             .putInt("service_attempt_ordinal", attemptOrdinal.coerceAtLeast(0))
             .putInt("service_attempt_total", attemptTotal.coerceAtLeast(0))
             .putLong("service_state_updated_at", now)
-            .apply {
-                if (normalizedState == NovaVpnService.STATE_STOPPED) {
-                    remove("traffic_mask_recent_probe_host")
-                    remove("traffic_mask_recent_probe_pool")
-                }
-            }
-            .commit()
+        if (normalizedState == NovaVpnService.STATE_STOPPED) {
+            stateEditor.remove("traffic_mask_recent_probe_host")
+            stateEditor.remove("traffic_mask_recent_probe_pool")
+        }
+        stateEditor.apply()
         if (normalizedState == NovaVpnService.STATE_STOPPED) {
             clearTrafficMaskStateFile()
         }
@@ -1237,10 +1248,10 @@ class ClientData(context: Context) {
             ?: prefs.getLong("service_state_updated_at", 0L)
     fun markSoftReapplyPending(durationMs: Long = 15000L) {
         val until = System.currentTimeMillis() + durationMs.coerceAtLeast(1000L)
-        prefs.edit().putLong("soft_reapply_pending_until", until).commit()
+        prefs.edit().putLong("soft_reapply_pending_until", until).apply()
     }
     fun clearSoftReapplyPending() {
-        prefs.edit().remove("soft_reapply_pending_until").commit()
+        prefs.edit().remove("soft_reapply_pending_until").apply()
     }
     fun isSoftReapplyPending(): Boolean {
         val until = prefs.getLong("soft_reapply_pending_until", 0L)
@@ -1249,10 +1260,10 @@ class ClientData(context: Context) {
     }
     fun markTransientConnectingPending(durationMs: Long = 8000L) {
         val until = System.currentTimeMillis() + durationMs.coerceAtLeast(1000L)
-        prefs.edit().putLong("transient_connecting_pending_until", until).commit()
+        prefs.edit().putLong("transient_connecting_pending_until", until).apply()
     }
     fun clearTransientConnectingPending() {
-        prefs.edit().remove("transient_connecting_pending_until").commit()
+        prefs.edit().remove("transient_connecting_pending_until").apply()
     }
     fun isTransientConnectingPending(): Boolean {
         val until = prefs.getLong("transient_connecting_pending_until", 0L)
@@ -1268,7 +1279,7 @@ class ClientData(context: Context) {
             .putString("restricted_mobile_network_id", networkId)
             .putBoolean("restricted_mobile_detected", detected)
             .putLong("restricted_mobile_checked_at", checkedAtMs)
-            .commit()
+            .apply()
     }
     fun getCachedRestrictedMobileStatus(
         networkId: String,
@@ -4760,7 +4771,7 @@ class ClientData(context: Context) {
             put("observed_at", nowMs)
         }
         val raw = snapshot.toString()
-        prefs.edit().putString("tunnel_ui_snapshot", raw).commit()
+        prefs.edit().putString("tunnel_ui_snapshot", raw).apply()
         writeAtomicRaw(tunnelUiSnapshotFile, raw)
     }
 
@@ -4903,7 +4914,7 @@ class ClientData(context: Context) {
     }
 
     fun clearTunnelUiSnapshot() {
-        prefs.edit().remove("tunnel_ui_snapshot").commit()
+        prefs.edit().remove("tunnel_ui_snapshot").apply()
         writeAtomicRaw(tunnelUiSnapshotFile, "")
     }
 
