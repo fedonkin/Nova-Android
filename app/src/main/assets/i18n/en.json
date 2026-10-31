@@ -1360,5 +1360,6 @@
  "Задержка UDP-профилей (AWG) — время разрешения имени, не RTT. Для IP-адреса замера нет, показано «—».": "UDP profiles (AWG): latency is the name resolution time, not RTT. An IP address cannot be measured, shown as “—”.",
  "Адаптация к условиям сети": "Adapt to network conditions",
  "Камень и золотая филигрань: кнопка — плита с самоцветами, шрифт с засечками": "Stone and gold filigree: button — slab with gems, serif font",
- "Остановить адаптацию": "Stop adaptation"
+ "Остановить адаптацию": "Stop adaptation",
+ "{0} с": "{0} s"
 }

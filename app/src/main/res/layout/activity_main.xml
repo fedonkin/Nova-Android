@@ -85,6 +85,7 @@
         android:textSize="15sp"
         android:fontFamily="sans-serif-medium"
         android:letterSpacing="0.18"
+        android:fontFeatureSettings="'tnum'"
         android:lineSpacingExtra="2dp"
         android:breakStrategy="balanced"
         android:paddingTop="28dp"

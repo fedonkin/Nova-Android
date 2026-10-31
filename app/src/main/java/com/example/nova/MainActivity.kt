@@ -89,6 +89,12 @@ class MainActivity : AppCompatActivity() {
         /** Как часто опрашивать прогресс обновления, пока он вообще меняется. */
         private const val UPDATE_CHIP_TICK_MS = 1_000L
 
+        /**
+         * Янтарный цвет надписи, пока подключение идёт. Раньше литерал стоял в пяти
+         * местах: смена оттенка означала пять правок и надежду, что шестого не забыли.
+         */
+        private val CONNECTING_STATUS_COLOR: Int = android.graphics.Color.parseColor("#C99514")
+
         /** Действие, пришедшее с виджета рабочего стола. */
         const val EXTRA_WIDGET_ACTION = "extra_widget_action"
         const val WIDGET_ACTION_NEXT_PROFILE = "next_profile"
@@ -541,6 +547,20 @@ class MainActivity : AppCompatActivity() {
     private var isStartFlowActive = false
     @Volatile
     private var pendingStatusText = "ПОДКЛЮЧЕНИЕ..."
+    /**
+     * Когда началось текущее подключение, по `elapsedRealtime`; 0 — подключения нет.
+     * Отсюда считается «· 5 с» в надписи статуса: неподвижная надпись во время
+     * пятнадцатисекундного ожидания читается как зависшее приложение. Считаем от
+     * начала подключения, а не от попытки: человеку важно, сколько он ждёт всего,
+     * а перебор профилей внутри — наша кухня.
+     */
+    private var connectingStartedAtMs = 0L
+    /**
+     * Основа последней надписи подключения, к которой мы приписывали секунды.
+     * Нужна, чтобы не затирать чужие надписи: экран в это же время может
+     * показывать «РЕГИСТРАЦИЯ PROTON...» или процент регистрации устройства.
+     */
+    private var connectingBaseText = ""
     private val startFlowGeneration = AtomicInteger(0)
     private var lastDeadConnectingRecoveryAtMs = 0L
 
@@ -5161,6 +5181,7 @@ class MainActivity : AppCompatActivity() {
         currentTunnelBackend = resolvePendingConnectBackend()
         pendingStatusText = initialStatus
         isStartFlowActive = true
+        connectingStartedAtMs = SystemClock.elapsedRealtime()
         vpnState = NovaVpnService.STATE_CONNECTING
         clientData.markTransientConnectingPending(START_FLOW_TRANSIENT_PENDING_MS)
         markServiceConnectingLocally(currentTunnelBackend)
@@ -5515,9 +5536,46 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderStartFlowState(restartBackdrop: Boolean = false) {
         renderConnectingState(
-            statusText = pendingStatusText.ifBlank { buildConnectingStatusText() },
+            statusText = withConnectingElapsed(pendingStatusText.ifBlank { buildConnectingStatusText() }),
             restartBackdrop = restartBackdrop,
         )
+    }
+
+    /**
+     * Дописывает к надписи подключения, сколько уже ждём: «ПОДКЛЮЧЕНИЕ... AUTO · 4 с».
+     *
+     * Цифра обновляется тем же опросом состояния, что и всё остальное на экране,
+     * поэтому отдельного таймера нет: лишний `postDelayed` будил бы экран ради
+     * одной цифры. Единица измерения идёт через каталог переводов («{0} с» →
+     * «{0} s»), иначе в английском интерфейсе к подписи приписывалась бы русская «с».
+     */
+    private fun withConnectingElapsed(text: String): String {
+        val seconds = ConnectElapsed.secondsOrNull(
+            startedAtMs = connectingStartedAtMs,
+            nowMs = SystemClock.elapsedRealtime(),
+        ) ?: return text
+        connectingBaseText = text
+        return "$text · ${NovaLanguage.tr(this, "{0} с").replace("{0}", seconds.toString())}"
+    }
+
+    /**
+     * Обновляет только надпись статуса, не перерисовывая экран.
+     *
+     * `updateUiByState` зовётся на смену состояния и на сдвиг счётчика попыток, а
+     * секунды идут своим ходом: без этой строки «· 4 с» застывало бы на первой
+     * цифре, пока счётчик попыток стоит. Полная перерисовка (`renderConnectingState`)
+     * здесь не годится — она снимает и вешает сеть и сбрасывает показания.
+     */
+    private fun refreshConnectingElapsedText() {
+        // Идёт регистрация устройства — экран показывает её процент, и перебивать
+        // его секундами нельзя.
+        if (applyDeviceRegistrationStatusIfActive()) return
+        val base = connectingBaseText.ifBlank { pendingStatusText.ifBlank { buildConnectingStatusText() } }
+        // Экран успел показать что-то своё (регистрация Proton, процент регистрации
+        // устройства) — секунды туда не дописываем, иначе затёрли бы его надпись.
+        val shown = NovaLanguage.sourceText(tvStatus)?.toString().orEmpty()
+        if (shown.isNotEmpty() && !shown.startsWith(base)) return
+        applyStatusStyle(withConnectingElapsed(base), CONNECTING_STATUS_COLOR)
     }
 
     private fun resetAttemptProgressTracking() {
@@ -6100,6 +6158,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (vpnState == NovaVpnService.STATE_CONNECTING) {
+            if (previousState != NovaVpnService.STATE_CONNECTING) {
+                connectingStartedAtMs = SystemClock.elapsedRealtime()
+            }
             currentTunnelBackend = getPersistedServiceBackend().ifBlank { currentTunnelBackend }
             val persistedAttemptOrdinal = clientData.getServiceAttemptOrdinal()
             val persistedAttemptTotal = clientData.getServiceAttemptTotal()
@@ -6158,7 +6219,8 @@ class MainActivity : AppCompatActivity() {
 
         when {
             discoveryRunning -> renderWarpDiscoveryState(discoverySnapshot!!)
-            vpnState == NovaVpnService.STATE_CONNECTING -> renderConnectingState(buildConnectingStatusText())
+            vpnState == NovaVpnService.STATE_CONNECTING ->
+                renderConnectingState(withConnectingElapsed(buildConnectingStatusText()))
             vpnState == NovaVpnService.STATE_CONNECTED -> {
                 currentTunnelBackend = resolveConnectedUiBackend()
                 val preserveKnownIps =
@@ -6214,7 +6276,7 @@ class MainActivity : AppCompatActivity() {
         currentAttemptTotal = snapshot.total.coerceAtLeast(0)
         applyStatusStyle(
             text = if (isAdaptationMessage(snapshot.message)) "АДАПТАЦИЯ" else "ПРОВЕРКА WARP",
-            textColor = Color.parseColor("#C99514"),
+            textColor = CONNECTING_STATUS_COLOR,
         )
         updateAttemptProgressDisplay()
         resetLatencyDisplay()
@@ -6260,7 +6322,7 @@ class MainActivity : AppCompatActivity() {
         if (!applyDeviceRegistrationStatusIfActive()) {
             applyStatusStyle(
                 text = statusText,
-                textColor = Color.parseColor("#C99514"),
+                textColor = CONNECTING_STATUS_COLOR,
             )
         }
         updateAttemptProgressDisplay()
@@ -6288,7 +6350,7 @@ class MainActivity : AppCompatActivity() {
         if (!applyDeviceRegistrationStatusIfActive()) {
             applyStatusStyle(
                 text = "ПРОВЕРКА ТУННЕЛЯ...",
-                textColor = Color.parseColor("#C99514"),
+                textColor = CONNECTING_STATUS_COLOR,
             )
         }
         updateAttemptProgressDisplay()
@@ -6303,6 +6365,8 @@ class MainActivity : AppCompatActivity() {
         preserveKnownIps: Boolean = false,
         animateBackdrop: Boolean = true,
     ) {
+        connectingStartedAtMs = 0L
+        connectingBaseText = ""
         manualStopUiSuppressedUntilMs = 0L
         primaryActionPreviewActive = false
         if (!connectedUiAwaitingProof || lastTunnelConnectedAtMs == 0L) {
@@ -6462,6 +6526,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderStoppedState() {
+        connectingStartedAtMs = 0L
+        connectingBaseText = ""
         releaseVpnNetwork()
         setBackdropStopped()
         ipRefreshGeneration.incrementAndGet()
@@ -6820,6 +6886,7 @@ class MainActivity : AppCompatActivity() {
             updateUiByState(persistedState)
         } else if (persistedState == NovaVpnService.STATE_CONNECTING) {
             updateAttemptProgressDisplay()
+            refreshConnectingElapsedText()
         }
         // Подпись под статусом меняется и без смены состояния.
         //
@@ -7300,7 +7367,7 @@ class MainActivity : AppCompatActivity() {
         val dots = ".".repeat(1 + (protonEllipsisStep % 3))
         applyStatusStyle(
             text = "РЕГИСТРАЦИЯ PROTON$dots",
-            textColor = Color.parseColor("#C99514"),
+            textColor = CONNECTING_STATUS_COLOR,
         )
         // Бейдж и адреса — прочерками: показывать чужой выход как свой нельзя (I10).
         currentIpv4 = "..."
@@ -7316,7 +7383,7 @@ class MainActivity : AppCompatActivity() {
         if (!clientData.isDeviceRegistrationInProgress()) return false
         applyStatusStyle(
             text = "РЕГИСТРАЦИЯ... ОЖИДАЙТЕ",
-            textColor = Color.parseColor("#C99514"),
+            textColor = CONNECTING_STATUS_COLOR,
         )
         return true
     }
