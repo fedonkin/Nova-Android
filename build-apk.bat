@@ -24,11 +24,11 @@ for /f "tokens=2 delims=:" %%c in ('chcp') do set "OLD_CP=%%c"
 set "OLD_CP=%OLD_CP: =%"
 chcp 65001 >nul 2>nul
 title Nova: сборка APK
-rem Двойной щелчок по файлу запускает его в отдельном окне, которое cmd
-rem закрывает сразу по завершении — тогда ждём нажатия клавиши.
-set "PAUSE_AT_END=0"
-echo "%CMDCMDLINE%" | find /i "%~nx0" >nul 2>nul
-if not errorlevel 1 set "PAUSE_AT_END=1"
+rem Окно в конце не закрывается само и не закрывается клавишей: оно ждёт
+rem крестик. Иначе сообщение об ошибке исчезает раньше, чем его прочитали,
+rem а при двойном щелчке — ещё и без возможности что-то скопировать.
+rem Для скриптов и CI есть /nohold: тогда окно не держим.
+set "HOLD_AT_END=1"
 
 set "FLAVOR=github"
 set "FLAVOR_TASK=Github"
@@ -60,6 +60,7 @@ if /i "%~1"=="/diag" (set "EXTRA_FLAGS=%EXTRA_FLAGS% -PnovaDiagnostics" & shift 
 if /i "%~1"=="/install" (set "DO_INSTALL=1" & shift & goto args)
 if /i "%~1"=="/jdk" (set "JDK_ARG=%~2" & shift & shift & goto args)
 if /i "%~1"=="/trace" (set "EXTRA_FLAGS=%EXTRA_FLAGS% --stacktrace" & shift & goto args)
+if /i "%~1"=="/nohold" (set "HOLD_AT_END=0" & shift & goto args)
 echo.
 echo   Неизвестный ключ: %~1
 goto usage
@@ -114,6 +115,7 @@ if not defined SDK_FOUND if exist "%LOCALAPPDATA%\Android\Sdk\platforms" set "SD
 if not defined SDK_FOUND goto sdk_unknown
 if not defined ANDROID_HOME set "ANDROID_HOME=%SDK_FOUND%"
 echo     %SDK_FOUND%
+call :check_sdk_components
 goto sdk_checked
 
 :sdk_unknown
@@ -197,7 +199,9 @@ if errorlevel 1 (
     call :probe "https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/9.1.0/gradle-9.1.0.pom" "Google Maven — dl.google.com"
     call :probe "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugin/2.2.10/kotlin-gradle-plugin-2.2.10.pom" "Maven Central — repo1.maven.org"
     call :probe "https://plugins.gradle.org/m2/org/jetbrains/kotlin/android/org.jetbrains.kotlin.android.gradle.plugin/2.2.10/org.jetbrains.kotlin.android.gradle.plugin-2.2.10.pom" "портал плагинов — plugins.gradle.org"
+    call :probe "https://services.gradle.org/distributions/gradle-9.3.1-bin.zip" "дистрибутив Gradle 9.3.1 — services.gradle.org"
 )
+if defined SDK_MISSING echo     - В наборе Android SDK не хватает компонентов: список в разделе [2/3].
 echo.
 echo   Частые причины:
 echo     - JDK новее 25. Gradle 9.3.1 на такой JDK падает как раз с «plugin
@@ -209,6 +213,10 @@ echo     - Maven Central или портал плагинов не открыв�
 echo       НЕДОСТУПЕН. Помогает VPN или прокси, прописанный в
 echo       %USERPROFILE%\.gradle\gradle.properties:
 echo         systemProp.https.proxyHost=... systemProp.https.proxyPort=...
+echo     - Нет NDK 27.2.12479018 или CMake 3.22.1: проект собирает JNI-слой
+echo       tun2proxy из src\main\cpp, а версии зашиты в app\build.gradle.kts.
+echo       NDK 28+ не подойдёт: нужна именно 27.2.12479018 и CMake 3.22.1.
+echo       Поставить: см. раздел [2/3] выше либо Android Studio, SDK Tools.
 echo     - Android SDK не найден: docs\BUILD.md, «Что должно быть установлено».
 echo     - Выпуск: нет keystore.properties либо ключ релея выписан на другую
 echo       версию, см. docs\BUILD.md, «Подпись релиза» и «Ключ релея».
@@ -247,13 +255,13 @@ echo   Сборка не выполнена.
 
 :fail_silent
 chcp %OLD_CP% >nul 2>nul
-if "%PAUSE_AT_END%"=="1" pause
+call :hold_window
 endlocal
 exit /b 1
 
 :finish_ok
 chcp %OLD_CP% >nul 2>nul
-if "%PAUSE_AT_END%"=="1" pause
+call :hold_window
 endlocal
 exit /b 0
 
@@ -278,20 +286,72 @@ echo     /install   установить готовый APK на устройс�
 echo     /jdk ПУТЬ  собрать этой JDK, например /jdk "C:\Program Files\Eclipse
 echo                Adoptium\jdk-17"; нужно, когда java в PATH новее 25
 echo     /trace     добавить --stacktrace для разбора падений
+echo     /nohold    не держать окно открытым (для скриптов и CI)
 echo     /help      эта справка
 echo.
 echo   Готовый файл остаётся в app\build\outputs\apk и копируется в out\.
 echo   Подробности: docs\BUILD.md
 echo.
-echo   Скрипт можно запустить двойным щелчком: окно останется открытым
-echo   до нажатия клавиши.
+echo   Окно закрывается только крестиком [X], клавиша его не закрывает.
 echo.
 chcp %OLD_CP% >nul 2>nul
+call :hold_window
 endlocal
 exit /b 0
 
 rem --- вспомогательное ------------------------------------------------------
 rem До сюда управление доходит только через call.
+
+:hold_window
+rem Ждём крестик, а не клавишу: клавиша окно больше не закрывает. Выхода из
+rem этой подпрограммы нет, если не задан /nohold.
+if "%HOLD_AT_END%"=="0" goto :eof
+rem Вызывают нас уже после возврата исходной кодовой страницы, а текст ниже
+rem русский. Без этого он выводится мусором ровно в том сообщении, ради
+rem которого окно и держится.
+chcp 65001 >nul 2>nul
+if not "%HOLD_SHOWN%"=="1" echo.
+if not "%HOLD_SHOWN%"=="1" echo   Окно закрывается только крестиком [X] в правом верхнем углу.
+if not "%HOLD_SHOWN%"=="1" echo   Клавиша его не закрывает: дочитайте и нажмите [X].
+if not "%HOLD_SHOWN%"=="1" echo   Следующий запуск без удержания: build-apk.bat /nohold
+set "HOLD_SHOWN=1"
+:hold_window_wait
+%SystemRoot%\System32\timeout.exe /t 3600 /nobreak >nul 2>nul
+if errorlevel 1 %SystemRoot%\System32\ping.exe -n 3600 127.0.0.1 >nul 2>nul
+goto hold_window_wait
+
+:check_sdk_components
+rem Состав SDK проверяем поимённо. «Gradle ругается» чаще всего на NDK
+rem 27.2.12479018 и CMake 3.22.1: Android Studio их не ставит, пока в SDK
+rem Tools не отметить галочки, а сообщение при этом невнятное.
+set "SDK_MISSING="
+if exist "%SDK_FOUND%\platforms\android-35" echo     platform android-35: есть
+if not exist "%SDK_FOUND%\platforms\android-35" call :need_component "platforms;android-35" "Android SDK Platform 35"
+dir /b /ad "%SDK_FOUND%\build-tools" >nul 2>nul
+if errorlevel 1 call :need_component "build-tools;35.0.0" "Android SDK Build-Tools"
+if not errorlevel 1 echo     build-tools: есть
+if exist "%SDK_FOUND%\platform-tools\adb.exe" echo     platform-tools (adb): есть
+if not exist "%SDK_FOUND%\platform-tools\adb.exe" call :need_component "platform-tools" "platform-tools (нужен для /install)"
+if exist "%SDK_FOUND%\ndk\27.2.12479018" echo     NDK 27.2.12479018: есть
+if not exist "%SDK_FOUND%\ndk\27.2.12479018" call :need_component "ndk;27.2.12479018" "NDK 27.2.12479018"
+if exist "%SDK_FOUND%\cmake\3.22.1" echo     CMake 3.22.1: есть
+if not exist "%SDK_FOUND%\cmake\3.22.1" call :need_component "cmake;3.22.1" "CMake 3.22.1"
+if not defined SDK_MISSING echo     все нужные компоненты на месте
+if not defined SDK_MISSING goto :eof
+echo.
+echo     Не хватает перечисленного - сборка упадёт именно на нём. Поставить
+echo     можно одной командой (подставьте путь к sdkmanager со своей машины):
+echo         sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+echo     Либо в Android Studio: Settings - Languages and Frameworks - Android SDK -
+echo     SDK Tools, галочка Show Package Details, затем NDK (Side by side) 27.2
+echo     и CMake 3.22.1.
+goto :eof
+
+:need_component
+rem Первый параметр - идентификатор пакета sdkmanager, второй - имя для журнала.
+set "SDK_MISSING=1"
+echo     %~2: НЕТ, нужен пакет %~1
+goto :eof
 
 :read_java_version
 rem Ставит JAVA_MAJOR по выводу java -version. Пишем в файл: у самого вывода
