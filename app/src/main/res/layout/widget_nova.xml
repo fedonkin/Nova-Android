@@ -38,10 +38,12 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center_vertical">
 
+    <!-- Рамка — рисунок темы под кнопками; сама по себе она ничего не значит. -->
     <ImageView
         android:id="@+id/widget_frame_img"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:importantForAccessibility="no"
         android:scaleType="fitXY" />
 
     <LinearLayout
