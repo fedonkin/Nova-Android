@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -44,21 +45,28 @@ import kotlin.math.sin
  *
  * ## Волны
  *
- * Волны остались только на время подключения и по-прежнему идут из центра кнопки
- * ([setPulseOrigin]). След — **один** штрих, поперёк которого лежит радиальный
- * градиент: снаружи обрыв в прозрачность, на фронте максимум, внутрь длинный
- * хвост. Повторённые контуры читались как повторённые контуры — три отдельные
- * линии вместо следа.
+ * Волны живут только во время подключения и идут из центра кнопки
+ * ([setPulseOrigin]). Каждая волна — это **тонкая линия света** по фронту и мягкий
+ * свет вокруг неё: длинный слабый хвост внутрь, подъём к кромке, обрыв сразу за
+ * ней. Кромка не идеальная окружность — три медленные гармоники смещают её на
+ * ~2 %, поэтому фронт «расходится», а не «вращается».
+ *
+ * Приём, который делает это дешёвым: **профиль зашит в шейдер радиусом 1**, и
+ * путь строится в единичном радиусе, а размер задаёт `canvas.scale`. Шейдер
+ * собирается один раз на смену акцента; в кадре — один `Path`, одна кисть, ноль
+ * аллокаций, ноль битмапов, ноль размытий. Это та же идея, что у шейдерных
+ * «аврор» на лендингах: цвет и форма считаются один раз, а кадр двигает только
+ * масштаб и альфу.
  *
  * Поверх волн зажигается созвездие — то же самое, что человек увидит после
  * подключения: точки берутся из [NovaConstellation], общей с фоновой анимацией.
  *
  * ## Чем это платится
  *
- * Ни одного размытия, ни одного программного слоя. На кадр: круг зарева,
- * два обода, 72 отрезка рисок, след головки из [COMET_SEGMENTS] дуг и — только
- * в подключении — обход созвездия и до трёх волн. Шейдеры создаются на кадр
- * по одному на волну, как и раньше.
+ * Ни одного размытия, ни одного программного слоя, ни одной аллокации в кадре.
+ * На кадр: круг зарева, два обода, 72 отрезка рисок, след головки из
+ * [COMET_SEGMENTS] дуг и — только в подключении — обход созвездия, до четырёх
+ * волн (по [BAND_SEGMENTS] точек) и один общий шейдер волны.
  *
  * Кадры идут, только пока вид прикреплён, видим и не прозрачен. В покое это
  * 24 кадра в секунду ([IDLE_FRAME_DELAY_MS]), в подключении — по кадру на
@@ -108,7 +116,6 @@ class TronRingsView @JvmOverloads constructor(
 
     /** Начало волн на времени общих часов; `null` — ещё не привязано. */
     private var animationStartSeconds: Double? = null
-    private var animatedPhase = 0f
 
     /** Момент, с которого считается появление композиции; `null` — с первого кадра. */
     private var enteredAtSeconds: Double? = null
@@ -149,17 +156,44 @@ class TronRingsView @JvmOverloads constructor(
     private var accentG = 228
     private var accentB = 255
 
-    /** Сколько волн в кадре и как они разнесены по фазе. */
-    private val ringOffsets = if (lowEndDevice) {
+    /**
+     * Волны: сколько их, с каким периодом и насколько разнесены.
+     *
+     * Периоды разные и не кратные друг другу — иначе волны выстраиваются в
+     * равномерную гребёнку, и рисунок повторяется через каждые несколько секунд.
+     * Смещения задают, что видно на экране в первую же секунду подключения.
+     */
+    private val bandOffsets = if (lowEndDevice) {
         floatArrayOf(0f, 0.5f)
     } else {
-        floatArrayOf(0f, 0.34f, 0.67f)
+        floatArrayOf(0f, 0.31f, 0.62f, 0.83f)
     }
 
-    /** Длина следа за фронтом волны. Он рисуется градиентом, а не повтором контура. */
-    private val trailWidth = (if (lowEndDevice) 34f else 48f) * density
+    private val bandCycleSeconds = if (lowEndDevice) {
+        floatArrayOf(9.8f, 8.6f)
+    } else {
+        floatArrayOf(8.2f, 7.0f, 9.3f, 7.7f)
+    }
 
-    private val cycleDurationMs = if (lowEndDevice) 9800f else 8200f
+    /** Фазы волн текущего кадра. Один массив, пересчитывается на месте. */
+    private val bandProgress = FloatArray(bandOffsets.size)
+
+    private val bandSegments = if (lowEndDevice) 64 else BAND_SEGMENTS
+
+    /**
+     * Кромка волны: единичные векторы и гармоники смещения по точкам.
+     *
+     * Считаются один раз при создании вида. В кадре остаётся подставить фазу по
+     * формуле сложения углов — шесть синусов на волну вместо трёхсот.
+     */
+    private val segmentCos = FloatArray(bandSegments)
+    private val segmentSin = FloatArray(bandSegments)
+    private val harm2Sin = FloatArray(bandSegments)
+    private val harm2Cos = FloatArray(bandSegments)
+    private val harm3Sin = FloatArray(bandSegments)
+    private val harm3Cos = FloatArray(bandSegments)
+    private val harm5Sin = FloatArray(bandSegments)
+    private val harm5Cos = FloatArray(bandSegments)
 
     private val bloomPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -180,7 +214,34 @@ class TronRingsView @JvmOverloads constructor(
     private val constellationStarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
-    private val wavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    /**
+     * Кисть волны. Шейдер задаёт профиль свечения, `alpha` — силу конкретной
+     * волны; ни то, ни другое не создаёт объектов в кадре.
+     */
+    private val bandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.BUTT
+        strokeJoin = Paint.Join.ROUND
+        isDither = true
+    }
+
+    /**
+     * Кисть кромки: тонкая линия света по фронту волны. Отдельная кисть, потому
+     * что тело волны — широкий градиент, а кромка — волосок в 1.25dp: одним
+     * штрихом это не нарисовать без размытия.
+     */
+    private val crestPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+        isDither = true
+    }
+
+    /** Кромка волны в единичном радиусе; пересобирается на месте, без мусора. */
+    private val bandPath = Path()
+
+    /** Профиль волны в единичном радиусе; пересобирается только при смене акцента. */
+    private var bandShader: Shader? = null
 
     private val arcRect = RectF()
     private val stars = ArrayList<Star>(64)
@@ -201,6 +262,18 @@ class TronRingsView @JvmOverloads constructor(
             val angle = radians(index * TICK_STEP_DEGREES)
             tickCos[index] = cos(angle).toFloat()
             tickSin[index] = sin(angle).toFloat()
+        }
+        for (step in 0 until bandSegments) {
+            val angle = radians(step * 360f / bandSegments)
+            val a = angle.toFloat()
+            segmentCos[step] = cos(angle).toFloat()
+            segmentSin[step] = sin(angle).toFloat()
+            harm2Sin[step] = sin(2f * a)
+            harm2Cos[step] = cos(2f * a)
+            harm3Sin[step] = sin(3f * a)
+            harm3Cos[step] = cos(3f * a)
+            harm5Sin[step] = sin(5f * a)
+            harm5Cos[step] = cos(5f * a)
         }
     }
 
@@ -246,6 +319,8 @@ class TronRingsView @JvmOverloads constructor(
         accentR = r
         accentG = g
         accentB = b
+        // Профиль волны зашит в акцент: шейдер пересоберётся лениво, на следующем кадре.
+        bandShader = null
         if (mode != Mode.STOPPED) invalidate()
     }
 
@@ -259,28 +334,35 @@ class TronRingsView @JvmOverloads constructor(
     }
 
     /**
-     * Фаза волн по времени часов, без продвижения: зовётся из отрисовки и привязки,
+     * Фазы волн по времени часов, без продвижения: зовётся из отрисовки и привязки,
      * кадр сам часы не двигает.
      */
-    private fun syncWavePhase(now: Double) {
+    private fun syncWaveProgress(now: Double) {
         val start = animationStartSeconds
             ?: NovaAnimationMemory.tronStartOrBegin(now).also { animationStartSeconds = it }
-        animatedPhase = SweepPhase.fraction(now - start, cycleDurationMs / 1000.0)
+        val elapsed = now - start
+        for (index in bandProgress.indices) {
+            bandProgress[index] = CoreDial.bandProgress(
+                elapsed,
+                bandCycleSeconds[index].toDouble(),
+                bandOffsets[index],
+            )
+        }
     }
 
-    /** Общая точка входа движения: время кадра и фаза волн, если они идут. */
+    /** Общая точка входа движения: время кадра и фазы волн, если они идут. */
     private fun syncMotion(now: Double) {
         motionSeconds = now
         if (enteredAtSeconds == null) enteredAtSeconds = now
-        if (mode == Mode.CONNECTING) syncWavePhase(now)
+        if (mode == Mode.CONNECTING) syncWaveProgress(now)
     }
 
     /** Явный перезапуск волн: отсчёт заново от текущего времени часов. */
     private fun restartWavePhase() {
         val now = NovaAnimationClock.peek()
         animationStartSeconds = NovaAnimationMemory.tronRestart(now)
-        animatedPhase = 0f
-        syncWavePhase(now)
+        bandProgress.fill(0f)
+        syncWaveProgress(now)
     }
 
     /** Возврат на экран: движение продолжается с той же фазы, кадры снова заказываются. */
@@ -310,7 +392,7 @@ class TronRingsView @JvmOverloads constructor(
                     // Продолжаем уже идущие волны: пересоздание вида не должно их сбрасывать.
                     val now = NovaAnimationClock.peek()
                     animationStartSeconds = NovaAnimationMemory.tronStartOrBegin(now)
-                    syncWavePhase(now)
+                    syncWaveProgress(now)
                 }
                 invalidate()
                 scheduleFrame()
@@ -319,7 +401,7 @@ class TronRingsView @JvmOverloads constructor(
             Mode.IDLE -> {
                 animationStartSeconds = null
                 NovaAnimationMemory.tronStop()
-                animatedPhase = 0f
+                bandProgress.fill(0f)
                 refreshIdleMotionPolicy()
                 if (enteredIdle) enteredAtSeconds = null
                 invalidate()
@@ -329,7 +411,7 @@ class TronRingsView @JvmOverloads constructor(
             Mode.STOPPED -> {
                 animationStartSeconds = null
                 NovaAnimationMemory.tronStop()
-                animatedPhase = 0f
+                bandProgress.fill(0f)
                 enteredAtSeconds = null
                 unscheduleFrame()
                 invalidate()
@@ -378,11 +460,14 @@ class TronRingsView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         if (mode == Mode.STOPPED || canvasWidth <= 0f || canvasHeight <= 0f) return
         syncMotion(NovaAnimationClock.peek())
-        if (constellationEnabled) {
-            if (mode == Mode.CONNECTING) drawConstellation(canvas)
+        if (mode == Mode.CONNECTING) {
+            // Порядок слоёв — как у прибора в свете: сначала волны, потом звёзды,
+            // и только сверху циферблат. Волна проходит ПОД рисками и ободом,
+            // поэтому шкала остаётся чёткой, а не тонет в засветке.
+            drawAurora(canvas)
+            if (constellationEnabled) drawConstellation(canvas)
         }
         drawDial(canvas)
-        if (mode == Mode.CONNECTING) drawWaves(canvas)
         // Заказываем кадр и отсюда: смена прозрачности или разметки приходит
         // без нашего участия, и без этого вид замирал бы после плавного появления.
         scheduleFrame()
@@ -582,54 +667,148 @@ class TronRingsView @JvmOverloads constructor(
         return hypot(dx.toDouble(), dy.toDouble()).toFloat()
     }
 
-    private fun drawWaves(canvas: Canvas) {
+    /**
+     * Волны подключения: светящиеся полосы, расходящиеся из кнопки.
+     *
+     * ## Почему это дешёвая «шейдерная» волна, а не размытие
+     *
+     * Волна — **один** путь и две кисти. Свет вокруг фронта зашит в радиальный
+     * шейдер радиусом **1**, путь строится в единичном радиусе, размер задаёт
+     * `canvas.scale`. Кромка — тот же путь, второй масштаб: тонкая линия в
+     * 1.25dp, которую градиентом не нарисовать (на таком радиусе она тоньше
+     * пикселя). Отсюда: шейдер собирается не на кадр, а один раз — на смену
+     * акцента; в кадре нет ни одной аллокации: ни битмапа, ни градиента, ни
+     * размытия, ни программного слоя.
+     *
+     * ## Почему кромка неровная
+     *
+     * Ровная окружность читается как радар. Кромка смещается тремя медленными
+     * гармониками (2θ, 3θ, 5θ) на полтора-два процента радиуса: полоса остаётся
+     * окружностью, но дышит. На радиальном шейдере это даёт ещё и плавные
+     * переливы яркости вдоль кольца — бесплатно, тем же одним штрихом.
+     *
+     * ## Почему волны расходятся с замедлением
+     *
+     * Фронт идёт как `progress^0.72`: вблизи кнопки быстро, к краям всё
+     * медленнее. Равномерный ход читается как метроном, замедляющийся — как
+     * энергия, которая уходит в экран.
+     */
+    private fun drawAurora(canvas: Canvas) {
+        val shader = bandShader ?: rebuildBandShader()
         val reach = maxReach()
-        for (index in ringOffsets.indices) {
-            val progress = ((animatedPhase - ringOffsets[index]) % 1f + 1f) % 1f
-            if (progress <= 0.001f || progress >= 1f) continue
-            val radius = reach * progress
-            if (radius <= 1f) continue
-
-            // Яркость гаснет к краю экрана квадратично: у самой кнопки волна
-            // плотная, к углам от неё остаётся намёк.
+        if (reach <= 1f) return
+        bandPaint.shader = shader
+        // Ширина тела задана в единичном радиусе: к краю экрана волна толще,
+        // у кнопки — тоньше, ровно как расходящийся фронт.
+        bandPaint.strokeWidth = BAND_TAIL_UNIT + BAND_FRONT_UNIT
+        crestPaint.color = crestColor()
+        for (index in bandProgress.indices) {
+            val progress = bandProgress[index]
+            val radius = reach * CoreDial.expansion(progress)
+            if (radius < 6f) continue
+            // Волна гаснет к краю экрана: у кнопки она плотная, у углов — намёк.
             val fade = (1f - progress) * (1f - progress)
-            val peak = (fade * 190f).toInt().coerceIn(0, 255)
-            if (peak <= 2) continue
-
-            // Свечение — один штрих с радиальным градиентом поперёк, а не
-            // несколько контуров подряд. Здесь фронт яркий, снаружи обрыв
-            // в прозрачность, а внутрь уходит длинный хвост.
-            val tail = trailWidth
-            val ahead = tail * 0.22f
-            val outer = radius + ahead
-            val inner = (radius - tail).coerceAtLeast(0f)
-            val width = outer - inner
-            if (width <= 1f) continue
-
-            wavePaint.shader = RadialGradient(
-                originX,
-                originY,
-                outer,
-                intArrayOf(
-                    Color.argb(0, accentR, accentG, accentB),
-                    Color.argb((peak * 0.18f).toInt().coerceIn(0, 255), accentR, accentG, accentB),
-                    Color.argb(peak, accentR, accentG, accentB),
-                    Color.argb(0, accentR, accentG, accentB),
-                ),
-                floatArrayOf(
-                    (inner / outer).coerceIn(0f, 1f),
-                    ((radius - tail * 0.45f) / outer).coerceIn(0f, 1f),
-                    (radius / outer).coerceIn(0f, 1f),
-                    1f,
-                ),
-                Shader.TileMode.CLAMP,
-            )
-            // Штрих шириной во весь след: сама краска уже несёт и фронт, и хвост.
-            wavePaint.strokeWidth = width
-            canvas.drawCircle(originX, originY, (inner + outer) * 0.5f, wavePaint)
-            wavePaint.shader = null
+            val haloAlpha = (fade * 220f).toInt().coerceIn(0, 255)
+            val crestAlpha = (fade * 235f).toInt().coerceIn(0, 255)
+            if (crestAlpha <= 3) continue
+            bandPaint.alpha = haloAlpha
+            buildBandPath(index, progress)
+            canvas.save()
+            canvas.translate(originX, originY)
+            canvas.scale(radius, radius)
+            // Тело: широкий градиент — свет вокруг фронта.
+            canvas.drawPath(bandPath, bandPaint)
+            // Кромка: тот же путь, второй масштаб — тонкая линия на единичном
+            // радиусе. Ширина пересчитывается в единицы пути, поэтому в dp она
+            // одна и та же у кнопки и у края экрана.
+            canvas.scale(CREST_SCALE, CREST_SCALE)
+            crestPaint.alpha = crestAlpha
+            // Молодая волна толще зрелой: по толщине читается, какая ближе.
+            val crestWidthDp = CREST_WIDTH_DP + (CREST_WIDTH_MIN_DP - CREST_WIDTH_DP) * progress
+            crestPaint.strokeWidth = crestWidthDp * density / (radius * CREST_SCALE)
+            canvas.drawPath(bandPath, crestPaint)
+            canvas.restore()
         }
+        bandPaint.alpha = 255
+        bandPaint.shader = null
     }
+
+    /**
+     * Кромка волны в единичном радиусе. Путь пересобирается на месте: в кадре
+     * не появляется ни одного объекта.
+     */
+    private fun buildBandPath(index: Int, progress: Float) {
+        bandPath.rewind()
+        // Свежая волна почти круглая, зрелая волнится сильнее: фронт «расходится»,
+        // а не «вращается».
+        val amplitude = BAND_WOBBLE * (0.55f + 0.45f * progress)
+        val drift = (motionSeconds * BAND_WOBBLE_SPEED + index * 1.7).toFloat()
+        val phase2 = drift * 1.7f
+        val phase3 = drift * 3.1f
+        val phase5 = drift * 5.3f
+        val sin2 = sin(phase2)
+        val cos2 = cos(phase2)
+        val sin3 = sin(phase3)
+        val cos3 = cos(phase3)
+        val sin5 = sin(phase5)
+        val cos5 = cos(phase5)
+        // Шейдер ярче всего на единичном радиусе, штрих лежит вокруг него: центр
+        // пути сдвинут так, чтобы наружу выступал короткий гребень, а внутрь —
+        // длинный хвост.
+        val radiusUnit = BAND_PATH_RADIUS_UNIT
+        for (step in 0 until bandSegments) {
+            val wobble = 0.18f * (harm2Sin[step] * cos2 + harm2Cos[step] * sin2) +
+                0.60f * (harm3Sin[step] * cos3 + harm3Cos[step] * sin3) +
+                0.22f * (harm5Sin[step] * cos5 + harm5Cos[step] * sin5)
+            val r = radiusUnit * (1f + amplitude * wobble)
+            val x = segmentCos[step] * r
+            val y = segmentSin[step] * r
+            if (step == 0) bandPath.moveTo(x, y) else bandPath.lineTo(x, y)
+        }
+        bandPath.close()
+    }
+
+    /**
+     * Свет вокруг фронта: прозрачность → длинный слабый хвост внутрь → подъём к
+     * кромке → прозрачность сразу за ней.
+     *
+     * Профиль задан в радиусах пути, а не в долях шейдера: так по коду видно, где
+     * он лежит относительно кромки. Нормируется на радиус шейдера один раз,
+     * поэтому шейдер масштабируется вместе с путём и не пересобирается на кадр.
+     */
+    private fun rebuildBandShader(): Shader {
+        val unit = 1f + BAND_FRONT_UNIT
+        val radii = floatArrayOf(
+            1f - BAND_TAIL_UNIT,
+            1f - BAND_TAIL_UNIT * 0.66f,
+            1f - BAND_TAIL_UNIT * 0.35f,
+            0.995f,
+            1.008f,
+            1f + BAND_FRONT_UNIT,
+        )
+        val shares = floatArrayOf(0f, 0.10f, 0.25f, 0.55f, 0.85f, 0f)
+        val stops = FloatArray(radii.size) { index -> radii[index] / unit }
+        val colors = IntArray(radii.size) { index ->
+            if (shares[index] <= 0f) Color.TRANSPARENT else withAlpha(accent(255), shares[index])
+        }
+        val shader = RadialGradient(0f, 0f, unit, colors, stops, Shader.TileMode.CLAMP)
+        bandShader = shader
+        return shader
+    }
+
+    /** Гребень: акцент, подсвеченный к белому, — так волна читается «мокрой». */
+    private fun crestColor(): Int = Color.rgb(
+        (accentR + (255 - accentR) * CREST_WHITEN).toInt().coerceIn(0, 255),
+        (accentG + (255 - accentG) * CREST_WHITEN).toInt().coerceIn(0, 255),
+        (accentB + (255 - accentB) * CREST_WHITEN).toInt().coerceIn(0, 255),
+    )
+
+    private fun withAlpha(color: Int, share: Float): Int = Color.argb(
+        (255f * share).toInt().coerceIn(0, 255),
+        Color.red(color),
+        Color.green(color),
+        Color.blue(color),
+    )
 
     // --------------------------------------------------------------- созвездие
 
@@ -702,10 +881,10 @@ class TronRingsView @JvmOverloads constructor(
         val reach = maxReach()
         val waveWidth = 26f * density
         var energy = 0f
-        for (offset in ringOffsets) {
-            val progress = ((animatedPhase - offset) % 1f + 1f) % 1f
+        for (index in bandProgress.indices) {
+            val progress = bandProgress[index]
             if (progress <= 0f) continue
-            val delta = abs(distance - reach * progress)
+            val delta = abs(distance - reach * CoreDial.expansion(progress))
             if (delta > waveWidth) continue
             val near = 1f - delta / waveWidth
             energy = max(energy, near * near * (1f - progress))
@@ -785,6 +964,40 @@ class TronRingsView @JvmOverloads constructor(
         const val BEZEL_SWEEP_DEGREES = 304f
 
         const val COMET_SEGMENTS = 10
+
+        /** Точек на кромке волны; на слабых устройствах — половина. */
+        const val BAND_SEGMENTS = 96
+
+        /**
+         * Профиль волны в единичном радиусе: хвост внутрь, гребень наружу.
+         * Отношение 3.75 : 1 — свет уходит в экран, а не вперёд, как у настоящей
+         * расходящейся волны.
+         */
+        const val BAND_TAIL_UNIT = 0.075f
+        const val BAND_FRONT_UNIT = 0.020f
+
+        /**
+         * Центр пути: шейдер ярче всего на единичном радиусе, а штрих должен
+         * покрыть [1 − хвост, 1 + гребень], поэтому путь сдвинут внутрь.
+         */
+        const val BAND_PATH_RADIUS_UNIT = 1f + (BAND_FRONT_UNIT - BAND_TAIL_UNIT) * 0.5f
+
+        /** Амплитуда смещения кромки: 1.9 % радиуса — заметно, но не «радар». */
+        const val BAND_WOBBLE = 0.019f
+
+        /** Скорость дрейфа гармоник, рад/с: медленнее волны, иначе кромка «кипит». */
+        const val BAND_WOBBLE_SPEED = 0.37
+
+        /**
+         * Кромка волны: толщина в dp (у молодой волны толще) и во сколько раз её
+         * радиус больше радиуса тела.
+         */
+        const val CREST_WIDTH_DP = 1.5f
+        const val CREST_WIDTH_MIN_DP = 0.9f
+        const val CREST_SCALE = 1f / BAND_PATH_RADIUS_UNIT
+
+        /** Насколько кромка подсвечена к белому. */
+        const val CREST_WHITEN = 0.32f
 
         /** Оборот головки в покое: медленно настолько, что движение не отвлекает. */
         const val IDLE_REVOLUTION_SECONDS = 46.0

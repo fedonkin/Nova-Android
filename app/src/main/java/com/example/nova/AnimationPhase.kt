@@ -3,6 +3,7 @@ package com.example.nova
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
@@ -10,15 +11,6 @@ import kotlin.math.sin
  * ([NovaAnimationClock]), поэтому состояние не хранится в видах: пересоздание вида
  * или возврат из паузы попадают в ту же точку цикла.
  */
-
-/** Фаза цикла в долях [0, 1) по прошедшему времени. Отрицательное время тоже даёт [0, 1). */
-internal object SweepPhase {
-    fun fraction(elapsedSeconds: Double, cycleSeconds: Double): Float {
-        if (cycleSeconds <= 0.0) return 0f
-        val x = elapsedSeconds / cycleSeconds
-        return (x - floor(x)).toFloat()
-    }
-}
 
 /**
  * Погружение фона. Один цикл — приближение вдвое за [CYCLE_SECONDS]; второй слой
@@ -109,6 +101,29 @@ internal object CoreDial {
         val near = 1f - delta / widthDegrees
         return (near * near).coerceIn(0f, 1f)
     }
+
+    /**
+     * Фаза волны в долях [0, 1): сколько она прошла от кнопки до края экрана.
+     *
+     * У каждой волны свой период и своё смещение, поэтому они расходятся не
+     * синхронно и рисунок не повторяется. Считается от времени, а не от номера
+     * кадра: частота кадров не влияет ни на скорость, ни на фазу.
+     */
+    fun bandProgress(elapsedSeconds: Double, cycleSeconds: Double, offset: Float): Float {
+        if (cycleSeconds <= 0.0) return 0f
+        val x = elapsedSeconds / cycleSeconds + offset
+        return (x - floor(x)).toFloat()
+    }
+
+    /**
+     * Радиус фронта в долях полного разлёта: `progress^power`.
+     *
+     * При [power] меньше единицы волна идёт быстро у кнопки и замедляется к
+     * краю — так читается энергия, уходящая в экран. Равномерный ход читается
+     * как метроном.
+     */
+    fun expansion(progress: Float, power: Float = 0.72f): Float =
+        progress.coerceIn(0f, 1f).pow(power)
 
     /**
      * Прогресс появления композиции [0, 1] за [durationSeconds] секунд.

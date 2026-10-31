@@ -9,16 +9,6 @@ class AnimationPhaseTest {
     private val eps = 1e-4f
 
     @Test
-    fun sweepPhaseWrapsIntoUnitInterval() {
-        assertEquals(0f, SweepPhase.fraction(0.0, 8.2), eps)
-        assertEquals(0.5f, SweepPhase.fraction(4.1, 8.2), eps)
-        assertEquals(0.25f, SweepPhase.fraction(8.2 * 2 + 2.05, 8.2), eps)
-        // Отрицательное время тоже даёт фазу в [0, 1).
-        assertEquals(0.75f, SweepPhase.fraction(-2.05, 8.2), eps)
-        assertEquals(0f, SweepPhase.fraction(5.0, 0.0), eps)
-    }
-
-    @Test
     fun diveCycleIsOneMinuteOfClockTime() {
         assertEquals(0.0, DivePhase.time(0.0), 1e-9)
         assertEquals(1.0, DivePhase.time(60.0), 1e-9)
@@ -157,5 +147,46 @@ class AnimationPhaseTest {
         }
         // Нулевой срок — композиция видна сразу, без деления на ноль.
         assertEquals(1f, CoreDial.reveal(0.0, 0.0), eps)
+    }
+
+    @Test
+    fun bandProgressWrapsAndKeepsItsOffset() {
+        assertEquals(0f, CoreDial.bandProgress(0.0, 8.2, 0f), eps)
+        assertEquals(0.5f, CoreDial.bandProgress(0.0, 8.2, 0.5f), eps)
+        assertEquals(0.75f, CoreDial.bandProgress(4.1, 8.2, 0.25f), eps)
+        assertEquals(0f, CoreDial.bandProgress(8.2 * 4, 8.2, 0f), 1e-4f)
+        // Период не задан — волна стоит, а не делится на ноль.
+        assertEquals(0f, CoreDial.bandProgress(3.0, 0.0, 0.4f), eps)
+    }
+
+    @Test
+    fun bandProgressStaysInRangeAndGrowsWithTime() {
+        val cycle = 7.3
+        var previous = -1f
+        var wraps = 0
+        for (step in 0 until 400) {
+            val value = CoreDial.bandProgress(step * 0.05, cycle, 0f)
+            assertTrue("value=$value", value >= 0f && value < 1f)
+            if (value < previous) wraps++
+            previous = value
+        }
+        // 20 секунд при периоде 7.3 — это два полных оборота и ещё немного.
+        assertEquals(2, wraps)
+    }
+
+    @Test
+    fun bandExpansionDeceleratesAndStaysNormalized() {
+        assertEquals(0f, CoreDial.expansion(0f), eps)
+        assertEquals(1f, CoreDial.expansion(1f), eps)
+        assertEquals(0f, CoreDial.expansion(-0.5f), eps)
+        assertEquals(1f, CoreDial.expansion(1.5f), eps)
+        // Замедление: в середине пути фронт ушёл дальше половины.
+        assertTrue(CoreDial.expansion(0.5f) > 0.5f)
+        var previous = -1f
+        for (step in 0..200) {
+            val value = CoreDial.expansion(step / 200f)
+            assertTrue("value=$value", value >= previous)
+            previous = value
+        }
     }
 }
