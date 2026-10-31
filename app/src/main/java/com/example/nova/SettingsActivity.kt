@@ -867,6 +867,15 @@ class SettingsActivity : AppCompatActivity() {
 
         }
 
+        // «Почему VPN не работает» — тот же список, что в README после «Если
+        // связь не восстановилась», но проверенный за человека. Живёт рядом с
+        // журналом: оба нужны тогда, когда что-то не работает.
+        findViewById<LinearLayout>(R.id.row_vpn_health)?.setOnClickListener {
+
+            startActivity(Intent(this, VpnHealthActivity::class.java))
+
+        }
+
         rowDomainBypass.setOnClickListener {
 
             startActivity(Intent(this, DomainBypassActivity::class.java))

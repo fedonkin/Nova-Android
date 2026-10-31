@@ -1410,6 +1410,63 @@
                 android:textStyle="bold" />
 
 
+            <!--
+                «Почему VPN не работает» — проверка ограничений системы. Стоит
+                первой в разделе диагностики: человек, у которого ничего не
+                подключилось, ищет причину раньше, чем журнал.
+            -->
+            <LinearLayout
+                android:id="@+id/row_vpn_health"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/novaCardBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp"
+                android:minHeight="64dp"
+                android:orientation="horizontal"
+                android:paddingLeft="16dp"
+                android:paddingTop="8dp"
+                android:paddingRight="16dp"
+                android:paddingBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Почему VPN не работает"
+                        android:textColor="?attr/novaTextTitle"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:drawableStart="@drawable/ic_nova_health"
+                        android:drawablePadding="14dp"
+                        android:drawableTint="?attr/novaIconTint" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="Найти, что мешает: другой VPN, батарея, DNS"
+                        android:textColor="?attr/novaTextHint"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:text="›"
+                    android:textColor="?attr/novaTextTitle"
+                    android:textSize="24sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
             <!-- Logging Row -->
             <LinearLayout
                 android:id="@+id/row_logs_container"
