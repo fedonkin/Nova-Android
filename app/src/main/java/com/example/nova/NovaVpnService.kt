@@ -732,6 +732,20 @@ class NovaVpnService : OperaNativeVpnService() {
         private const val TUNNEL_STALL_WATCH_INTERVAL_MS = 1_500L
 
         /**
+         * Частота проверок в первые секунды попытки.
+         *
+         * Ни один порог при этом не меняется: «рукопожатие не старше 1200 мс»,
+         * «VPN-сеть появилась в ConnectivityManager», «пора спросить пробу» —
+         * всё остаётся как было. Меняется только частота, с которой они
+         * проверяются: раньше между готовностью туннеля и проверкой стояло до
+         * 800 мс тишины, и ровно столько человек смотрел на «ПОДКЛЮЧЕНИЕ…» над
+         * уже работающим туннелем. Через окно тик возвращается к прежнему:
+         * дальше это наблюдение за сессией, и спешить там некуда.
+         */
+        private const val CONNECT_TICK_BOOST_WINDOW_MS = 4_000L
+        private const val CONNECT_TICK_BOOST_MS = 300L
+
+        /**
          * Пауза, на которую отправляется узел, брошенный из-за пропавшего потока.
          *
          * Замер показал, что тот же узел через полчаса вёз трафик без потерь, —
@@ -9527,7 +9541,10 @@ class NovaVpnService : OperaNativeVpnService() {
                 LogManager.log("tun2proxy для VLESS завершился. Поднимаем туннель заново.")
                 return VlessSessionResult(VlessSessionOutcome.TUNNEL_GONE, uptimeMs())
             }
-            Thread.sleep(1500L)
+            // Пауза стоит в конце тела, а не в начале: первая проба идёт сразу
+            // после подъёма туннеля. Раньше «жив ли узел» и задержка на экране
+            // появлялись только через полторы секунды после того, как всё уже
+            // работало.
             // Только проба через узел: VALIDATED залипает, а проверка через сеть VPN
             // на tun2proxy проходит всегда — рукопожатие и DNS отвечает он сам (G258).
             // Проба живости и есть замер задержки: запрос идёт наружу через сам узел.
@@ -9555,6 +9572,7 @@ class NovaVpnService : OperaNativeVpnService() {
                     return VlessSessionResult(VlessSessionOutcome.DATA_PLANE_LOST, uptimeMs())
                 }
             }
+            Thread.sleep(1_500L)
         }
         // Цикл прервали снаружи: остановка пользователем или новый цикл подключения.
         // В обоих случаях запасная цепочка не нужна — ей займётся тот, кто прервал.
@@ -13692,9 +13710,13 @@ class NovaVpnService : OperaNativeVpnService() {
                             vpnNet == null &&
                             vpnNetWaitMs < vpnNetworkWaitLimitMs
                     ) {
+                        // Сначала спрашиваем, потом ждём. Сеть, как правило, уже в
+                        // списке к этому моменту, и полсекунды тишины перед первым
+                        // вопросом были платой ни за что.
+                        vpnNet = resolveCurrentAttemptVpnNetwork()
+                        if (vpnNet != null) break
                         Thread.sleep(500)
                         vpnNetWaitMs += 500
-                        vpnNet = resolveCurrentAttemptVpnNetwork()
                     }
 
                     if (vpnNet == null) {
@@ -13727,7 +13749,13 @@ class NovaVpnService : OperaNativeVpnService() {
                             isChatAwareWarpMode(transportMode) -> 650L
                             else -> 800L
                         }
-                        Thread.sleep(watchdogSleepMs)
+                        // В начале попытки тикаем чаще (см. CONNECT_TICK_BOOST_MS):
+                        // проверки те же, но подтверждение туннеля не ждёт лишний тик.
+                        val youngAttempt =
+                            SystemClock.elapsedRealtime() - attemptStartedAt < CONNECT_TICK_BOOST_WINDOW_MS
+                        Thread.sleep(
+                            if (youngAttempt) minOf(watchdogSleepMs, CONNECT_TICK_BOOST_MS) else watchdogSleepMs
+                        )
 
                         if (!isConnected.get() && currentState == STATE_CONNECTED && hasRecentSuccessfulTunnelProbe()) {
                             skipStrategyLearning.set(true)
