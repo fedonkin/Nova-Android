@@ -35,6 +35,24 @@ build-apk.bat /help              все ключи
 `/fast` (без R8 и lint) и `/diag` (экран самодиагностики) передают те же флаги
 Gradle, что описаны ниже.
 
+Зависимости ставит соседний скрипт `setup-deps.bat`:
+
+```
+setup-deps.bat                   всё нужное в стандартный SDK
+setup-deps.bat /sdk "D:\Android\Sdk"   в свой SDK
+setup-deps.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.1-hotspot"
+setup-deps.bat /winget           нет JDK — поставить Temurin 17 через winget
+setup-deps.bat /build            поставить зависимости и сразу собрать
+```
+
+Что он делает: находит JDK 17–25 (или ставит Temurin 17 по `/winget`), создаёт
+папку SDK, если её нет, скачивает официальные Command-line Tools, принимает
+лицензии и ставит `platforms;android-<compileSdk>`, `build-tools`,
+`platform-tools`, `ndk` и `cmake` **тех версий, что зашиты в
+`app/build.gradle.kts`** — версии он читает из файла, а не держит у себя, и
+печатает найденные, чтобы расхождение с проектом было видно сразу. В конце —
+таблица «что стоит / чего нет» и запись `sdk.dir` в `local.properties`.
+
 ## Варианты сборки
 
 Сборка бывает двух видов, различие между ними ровно одно — откуда приходят
@@ -65,7 +83,8 @@ NDK и CMake Android Studio **не ставит по умолчанию**: в `S
 отметить (и включить `Show Package Details`, чтобы выбрать ровно 27.2.12479018
 и 3.22.1). Версии зашиты в `app/build.gradle.kts`, и NDK 28+, как и CMake 4.x,
 не подойдут — проект соберётся другим инструментом и упадёт на JNI-слое.
-`build-apk.bat` проверяет состав SDK поимённо и печатает, чего именно нет:
+`build-apk.bat` проверяет состав SDK поимённо и печатает, чего именно нет, а
+ставит всё это `setup-deps.bat`. Вручную — так:
 
 ```
 sdkmanager "platforms;android-35" "build-tools;35.0.0" ^

@@ -10,3 +10,4 @@ gradlew text eol=lf
 # построчно, и файл с одними LF ломается на метках и переходах). Правило
 # точечное: gradlew.bat как лежал с LF, так и лежит — его не трогаем.
 build-apk.bat text eol=crlf
+setup-deps.bat text eol=crlf

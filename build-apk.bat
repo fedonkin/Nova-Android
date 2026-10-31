@@ -216,7 +216,7 @@ echo         systemProp.https.proxyHost=... systemProp.https.proxyPort=...
 echo     - Нет NDK 27.2.12479018 или CMake 3.22.1: проект собирает JNI-слой
 echo       tun2proxy из src\main\cpp, а версии зашиты в app\build.gradle.kts.
 echo       NDK 28+ не подойдёт: нужна именно 27.2.12479018 и CMake 3.22.1.
-echo       Поставить: см. раздел [2/3] выше либо Android Studio, SDK Tools.
+echo       Поставить: setup-deps.bat (раздел [5/6]) либо Android Studio, SDK Tools.
 echo     - Android SDK не найден: docs\BUILD.md, «Что должно быть установлено».
 echo     - Выпуск: нет keystore.properties либо ключ релея выписан на другую
 echo       версию, см. docs\BUILD.md, «Подпись релиза» и «Ключ релея».
@@ -238,6 +238,7 @@ goto fail_silent
 echo     JDK не найден.
 echo.
 echo   Нужен JDK 17: winget install -e --id EclipseAdoptium.Temurin.17.JDK
+echo   Либо всё сразу одной командой: setup-deps.bat /winget
 echo   После установки откройте новую консоль — старая новых переменных не
 echo   увидит — либо задайте JAVA_HOME на папку с bin\java.exe.
 echo   Полная установка инструментов: tools\setup_android_tools.ps1
@@ -290,6 +291,8 @@ echo     /nohold    не держать окно открытым (для скр
 echo     /help      эта справка
 echo.
 echo   Готовый файл остаётся в app\build\outputs\apk и копируется в out\.
+echo   Чего-то не хватает? setup-deps.bat поставит JDK 17, Command-line Tools
+echo   и пакеты SDK тех версий, что зашиты в проект.
 echo   Подробности: docs\BUILD.md
 echo.
 echo   Окно закрывается только крестиком [X], клавиша его не закрывает.

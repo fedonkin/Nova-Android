@@ -1,4 +1,11 @@
 # Setup Android Development Tools for NovaAndroid
+#
+# Устаревающий путь: для Windows есть setup-deps.bat в корне проекта. Он берёт
+# версии пакетов из app/build.gradle.kts (compileSdk, ndkVersion, cmake.version)
+# и потому не расходится с проектом. Этот скрипт оставлен для тех, кто уже
+# привык к PowerShell, и правится вручную.
+#
+# Setup Android Development Tools for NovaAndroid
 # This script installs OpenJDK 17, Android SDK Command Line Tools, Platform Tools (ADB), and configures Environment Variables.
 # Run this script in an Elevated (Administrator) PowerShell window.
 
@@ -85,8 +92,8 @@ if (Test-Path $sdkManager) {
     $yes = @("y") * 30
     $yes | & $sdkManager --licenses | Out-Null
     
-    Write-Host "Installing packages (platform-tools, build-tools;34.0.0, platforms;android-34)..."
-    & $sdkManager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
+    Write-Host "Installing packages (platform-tools, build-tools;35.0.0, platforms;android-35, ndk;27.2.12479018, cmake;3.22.1)..."
+    & $sdkManager "platform-tools" "build-tools;35.0.0" "platforms;android-35" "ndk;27.2.12479018" "cmake;3.22.1"
 } else {
     Write-Host "sdkmanager.bat not found at $sdkManager!" -ForegroundColor Red
 }
