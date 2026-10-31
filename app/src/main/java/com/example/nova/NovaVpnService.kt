@@ -2323,6 +2323,7 @@ class NovaVpnService : OperaNativeVpnService() {
     }
 
     private fun configureAndStartOperaOnly(regionPreferenceOverride: String?, connectGenerationId: Int) {
+        ConnectTimeline.begin("opera")
         try {
             if (!isConnectGenerationCurrent(connectGenerationId)) {
                 logConnectAbortedBeforeStart("opera-only", connectGenerationId)
@@ -2447,6 +2448,7 @@ class NovaVpnService : OperaNativeVpnService() {
         val noticeBeforeChange = currentTransportNotice
         val clientData = ClientData(this)
         if (state == STATE_CONNECTED) {
+            ConnectTimeline.finish("подключено")
             lastStoppedStateCleanupAtMs = 0L
             lastConnectedAtMs = SystemClock.elapsedRealtime()
             connectedHealthProbeFailures = 0
@@ -3635,6 +3637,7 @@ class NovaVpnService : OperaNativeVpnService() {
     }
 
     private fun markSuccessfulTunnelProbe() {
+        ConnectTimeline.mark("проба")
         lastSuccessfulTunnelProbeAtMs = SystemClock.elapsedRealtime()
         val connectivityManager = getSystemService(android.net.ConnectivityManager::class.java)
         val selectedUnderlying = selectUnderlyingNetwork(connectivityManager)
@@ -6354,9 +6357,11 @@ class NovaVpnService : OperaNativeVpnService() {
         connectGenerationId: Int,
     ) {
         try {
+            ConnectTimeline.begin("warp")
             if (!waitForPreviousCleanupIfNeeded(connectGenerationId, "warp-connect")) return
             if (!isConnectGenerationCurrent(connectGenerationId)) return
             if (!ensureFreshTransportState(connectGenerationId, "warp-connect")) return
+            ConnectTimeline.mark("транспорт")
             suppressSessionRestore = false
             val clientData = ClientData(this)
             val normalizedReserved = normalizeReservedValue(reserved)
@@ -13804,6 +13809,7 @@ class NovaVpnService : OperaNativeVpnService() {
                         attemptStartedWallTimeSec = attemptStartedWallTimeSec,
                     ) || hasInboundTraffic(tunnelStats)
                     if (handshakeReady && firstHandshakeAtMs == 0L) {
+                        ConnectTimeline.mark("рукопожатие")
                         firstHandshakeAtMs = SystemClock.elapsedRealtime()
                     }
                     val attemptElapsedMs = SystemClock.elapsedRealtime() - attemptStartedAt
@@ -14765,6 +14771,7 @@ class NovaVpnService : OperaNativeVpnService() {
                         // вырастал до 1440, и на проводе получалось 1500 — ровно
                         // столько, сколько путь уже не везёт.
                         Nova.setTunnelMtu(currentWarpTunnelMtu.toLong())
+                        ConnectTimeline.mark("ядро")
                         Nova.startVPN(tunnelFdForEngine(attemptDescriptor), finalConfig)
                     }
                 } catch (t: Throwable) {
