@@ -2410,6 +2410,15 @@ class NovaVpnService : OperaNativeVpnService() {
             setCurrentBackend(BACKEND_WARP)
             broadcastState(STATE_STOPPED)
             stopSelf()
+        } finally {
+            if (ConnectTimeline.hasPending()) {
+                val outcome = when {
+                    currentState == STATE_CONNECTED -> "подхвачено"
+                    isUserStopped || explicitStopRequested -> "остановлено"
+                    else -> "не подключено"
+                }
+                ConnectTimeline.finish(outcome)
+            }
         }
     }
     
@@ -7795,6 +7804,19 @@ class NovaVpnService : OperaNativeVpnService() {
             setCurrentBackend(BACKEND_WARP)
             broadcastState(STATE_STOPPED)
             stopSelf()
+        } finally {
+            // Успех виден и без нас: строка уходит из broadcastState(CONNECTED).
+            // А вот срыв до CONNECTED раньше не оставлял ничего, хотя разложить
+            // по этапам нужно именно его — где встали, там и резать. Заодно
+            // отмечается подхват готового туннеля: он тоже не проходил этапов.
+            if (ConnectTimeline.hasPending()) {
+                val outcome = when {
+                    currentState == STATE_CONNECTED -> "подхвачено"
+                    isUserStopped || explicitStopRequested -> "остановлено"
+                    else -> "не подключено"
+                }
+                ConnectTimeline.finish(outcome)
+            }
         }
     }
 
@@ -13630,6 +13652,7 @@ class NovaVpnService : OperaNativeVpnService() {
                     continue
                 }
                 interfaceDescriptor = freshDescriptor
+                ConnectTimeline.mark("интерфейс")
                 LogManager.log("VPN интерфейс поднят для $currentEndpoint.")
                 attemptDescriptor = freshDescriptor
                 reusableDescriptor = freshDescriptor
@@ -13746,6 +13769,11 @@ class NovaVpnService : OperaNativeVpnService() {
                     val maxConnectivityProbeAttempts = attemptBudget.maxConnectivityProbeAttempts
                     val minProbeSpacingMs = attemptBudget.minProbeSpacingMs
 
+                    // Первый проход идёт сразу: рукопожатие нередко уже готово к
+                    // моменту, когда движок вернул управление (VPN интерфейс поднят
+                    // раньше), и тик ожидания был платой ни за что. Ранняя проба
+                    // этим не ускоряется — у неё свой порог по времени попытки.
+                    var firstTick = true
                     while (watchdogActive.get() && !isUserStopped && isConnectGenerationCurrent(connectGenerationId) && externalStopRequested?.invoke() != true) {
                         val watchdogSleepMs = when {
                             fastScanMode -> 350L
@@ -13754,13 +13782,17 @@ class NovaVpnService : OperaNativeVpnService() {
                             isChatAwareWarpMode(transportMode) -> 650L
                             else -> 800L
                         }
-                        // В начале попытки тикаем чаще (см. CONNECT_TICK_BOOST_MS):
-                        // проверки те же, но подтверждение туннеля не ждёт лишний тик.
-                        val youngAttempt =
-                            SystemClock.elapsedRealtime() - attemptStartedAt < CONNECT_TICK_BOOST_WINDOW_MS
-                        Thread.sleep(
-                            if (youngAttempt) minOf(watchdogSleepMs, CONNECT_TICK_BOOST_MS) else watchdogSleepMs
-                        )
+                        if (firstTick) {
+                            firstTick = false
+                        } else {
+                            // В начале попытки тикаем чаще (см. CONNECT_TICK_BOOST_MS):
+                            // проверки те же, но подтверждение туннеля не ждёт лишний тик.
+                            val youngAttempt =
+                                SystemClock.elapsedRealtime() - attemptStartedAt < CONNECT_TICK_BOOST_WINDOW_MS
+                            Thread.sleep(
+                                if (youngAttempt) minOf(watchdogSleepMs, CONNECT_TICK_BOOST_MS) else watchdogSleepMs
+                            )
+                        }
 
                         if (!isConnected.get() && currentState == STATE_CONNECTED && hasRecentSuccessfulTunnelProbe()) {
                             skipStrategyLearning.set(true)
@@ -14773,6 +14805,7 @@ class NovaVpnService : OperaNativeVpnService() {
                         Nova.setTunnelMtu(currentWarpTunnelMtu.toLong())
                         ConnectTimeline.mark("ядро")
                         Nova.startVPN(tunnelFdForEngine(attemptDescriptor), finalConfig)
+                        ConnectTimeline.mark("движок")
                     }
                 } catch (t: Throwable) {
                     attemptFailureReason.compareAndSet(null, "engine_crash")

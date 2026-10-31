@@ -67,6 +67,19 @@ class ConnectTimelineTest {
     }
 
     @Test
+    fun `hasPending различает начатый и закрытый замер`() {
+        ConnectTimeline.discard()
+        assertTrue(!ConnectTimeline.hasPending())
+
+        ConnectTimeline.begin("warp")
+        assertTrue(ConnectTimeline.hasPending())
+
+        now = 300
+        ConnectTimeline.finish("не подключено")
+        assertTrue(!ConnectTimeline.hasPending())
+    }
+
+    @Test
     fun `замер без begin ничего не печатает`() {
         ConnectTimeline.discard()
         now = 500
