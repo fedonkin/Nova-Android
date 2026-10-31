@@ -205,8 +205,8 @@ class FlowRadioGroup @JvmOverloads constructor(
         val red = Color.red(selectionGlowColor)
         val green = Color.green(selectionGlowColor)
         val blue = Color.blue(selectionGlowColor)
-        // Лестница как в `StrokeTextView.drawLineHalo`: форма у всех слоёв одна,
-        // меняется только радиус размытия. Расширять вместе с радиусом нельзя —
+        // Лестница из двенадцати слоёв: форма у всех одна, меняется только
+        // радиус размытия. Расширять вместе с радиусом нельзя —
         // у каждого слоя свой силуэт, и на дальнем крае проступают кольца.
         //
         // Размытие именно `OUTER`, а не `NORMAL`. `NORMAL` красит и внутренность
@@ -374,7 +374,7 @@ class FlowRadioGroup @JvmOverloads constructor(
     }
 
     private companion object {
-        /** Пары «доля радиуса — доля непрозрачности». Взяты у `StrokeTextView`. */
+        /** Пары «доля радиуса — доля непрозрачности». Подобраны под зарево 72dp. */
         private val HALO_LAYERS = arrayOf(
             floatArrayOf(1.00f, 0.14f), floatArrayOf(0.84f, 0.18f),
             floatArrayOf(0.70f, 0.23f), floatArrayOf(0.58f, 0.29f),

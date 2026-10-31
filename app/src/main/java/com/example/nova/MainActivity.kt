@@ -309,7 +309,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvAttemptProgress: TextView
     private lateinit var tvTransportNotice: TextView
     private lateinit var restrictedMobileDots: SlidingDotsIndicatorView
-    private lateinit var tvStatus: com.example.nova.StrokeTextView
+    private lateinit var tvStatus: com.example.nova.StatusTextView
     private lateinit var btnConnect: GlowPillButton
     private lateinit var btnNextProfile: GlowPillButton
     private lateinit var btnInstallUpdate: com.example.nova.UpdateChipView
@@ -6215,7 +6215,6 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = if (isAdaptationMessage(snapshot.message)) "АДАПТАЦИЯ" else "ПРОВЕРКА WARP",
             textColor = Color.parseColor("#C99514"),
-            textGlowColor = Color.parseColor("#F1C64A"),
         )
         updateAttemptProgressDisplay()
         resetLatencyDisplay()
@@ -6262,7 +6261,6 @@ class MainActivity : AppCompatActivity() {
             applyStatusStyle(
                 text = statusText,
                 textColor = Color.parseColor("#C99514"),
-                textGlowColor = Color.parseColor("#F1C64A"),
             )
         }
         updateAttemptProgressDisplay()
@@ -6291,7 +6289,6 @@ class MainActivity : AppCompatActivity() {
             applyStatusStyle(
                 text = "ПРОВЕРКА ТУННЕЛЯ...",
                 textColor = Color.parseColor("#C99514"),
-                textGlowColor = Color.parseColor("#F1C64A"),
             )
         }
         updateAttemptProgressDisplay()
@@ -6345,7 +6342,6 @@ class MainActivity : AppCompatActivity() {
             applyStatusStyle(
                 text = "АКТИВНО : РАБОТАЕТ",
                 textColor = Color.parseColor("#13A10E"),
-                textGlowColor = Color.parseColor("#13A10E"),
             )
         }
         updateAttemptProgressDisplay()
@@ -6509,7 +6505,6 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = "НЕ ПОДКЛЮЧЕНО",
             textColor = Color.parseColor("#FF4444"),
-            textGlowColor = Color.parseColor("#FF4444"),
         )
         updateAttemptProgressDisplay()
         btnConnect.text = "ПОДКЛЮЧИТЬ"
@@ -6523,7 +6518,6 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = "РАЗРЕШИ VPN",
             textColor = Color.parseColor("#F6D365"),
-            textGlowColor = Color.parseColor("#F6D365"),
         )
         btnConnect.text = "ПОДКЛЮЧИТЬ"
         applyPrimaryActionInterlock()
@@ -6539,7 +6533,6 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = "НЕТ ОКНА VPN",
             textColor = Color.parseColor("#FF6B6B"),
-            textGlowColor = Color.parseColor("#FF6B6B"),
         )
         btnConnect.text = "ПОДКЛЮЧИТЬ"
         applyPrimaryActionInterlock()
@@ -7308,7 +7301,6 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = "РЕГИСТРАЦИЯ PROTON$dots",
             textColor = Color.parseColor("#C99514"),
-            textGlowColor = Color.parseColor("#F1C64A"),
         )
         // Бейдж и адреса — прочерками: показывать чужой выход как свой нельзя (I10).
         currentIpv4 = "..."
@@ -7325,38 +7317,24 @@ class MainActivity : AppCompatActivity() {
         applyStatusStyle(
             text = "РЕГИСТРАЦИЯ... ОЖИДАЙТЕ",
             textColor = Color.parseColor("#C99514"),
-            textGlowColor = Color.parseColor("#F1C64A"),
         )
         return true
     }
 
-    private fun applyStatusStyle(
-        text: String,
-        textColor: Int,
-        textGlowColor: Int,
-    ) {
-        // Облако принимает цвет textGlowColor для 100% совпадения оттенка
-        val red = Color.red(textGlowColor)
-        val green = Color.green(textGlowColor)
-        val blue = Color.blue(textGlowColor)
-        val cloudColor = Color.argb(255, red, green, blue) // Яркое базовое свечение
-        tvStatus.letterSpacing = 0.096f
-        tvStatus.setStroke(7.4f, Color.parseColor("#EEF8A6"))
-        
-        // Отключаем свечение у самого текста
-        tvStatus.setStrokeGlow(0f, Color.TRANSPARENT)
-        tvStatus.setGlow(0f, Color.TRANSPARENT)
-        tvStatus.setPillStyle(
-            fillColor = Color.TRANSPARENT,
-            glowColor = cloudColor,
-            innerColor = Color.TRANSPARENT,
-            insetX = 10f,
-            insetY = 8f,
-            blurRadius = 72f,
-            ovalGlow = true,
-        )
-        tvStatus.text = text
-        tvStatus.setTextColor(textColor)
+    /**
+     * Надпись статуса: текст и цвет. Больше ничего.
+     *
+     * Раньше здесь собирался ореол — обводка 7.4dp цветом `#EEF8A6` и капсула
+     * с размытием 72dp, — и он закрывал собой половину экрана. Теперь состояние
+     * читается по цвету строки, набранной в разметке, а объём центральной
+     * композиции держит циферблат вокруг кнопки, а не пятно под текстом.
+     *
+     * Смена текста сравнивается с текущим: этот метод зовётся на каждом обновлении
+     * состояния, а лишняя установка текста — это лишний проход разметки.
+     */
+    private fun applyStatusStyle(text: String, textColor: Int) {
+        if (tvStatus.text?.toString() != text) tvStatus.text = text
+        if (tvStatus.currentTextColor != textColor) tvStatus.setTextColor(textColor)
     }
 
     private fun setBackdropStopped() {
@@ -7369,10 +7347,14 @@ class MainActivity : AppCompatActivity() {
                 ivBackgroundArt.visibility = View.GONE
                 ivBackgroundArt.alpha = 0f
                 ivBackgroundArt.revealProgress = 0f
-                tronBackdrop.setMode(TronRingsView.Mode.STOPPED)
-                tronBackdrop.visibility = View.GONE
-                tronBackdrop.alpha = 0f
                 hideNetworkBackground()
+                // В покое центр экрана больше не пустой: вокруг кнопки стоит
+                // циферблат (см. [TronRingsView]). Появление композиции считает сам
+                // вид (0.9 с от входа в режим), поэтому здесь только видимость:
+                // аниматор на каждом обновлении состояния перезапускал бы показ.
+                tronBackdrop.setMode(TronRingsView.Mode.IDLE)
+                tronBackdrop.visibility = View.VISIBLE
+                tronBackdrop.alpha = 1f
                 return
             }
             MainBackgroundPolicy.MODE_NONE -> {

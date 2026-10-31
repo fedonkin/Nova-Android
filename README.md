@@ -249,6 +249,7 @@ Nova создана с участием проверенных временем 
 - [docs/masque-connect-ip.md](docs/masque-connect-ip.md) — MASQUE: разбор ступеней подключения и замеры
 - [docs/gateway-sharing.md](docs/gateway-sharing.md) — раздача на другие устройства
 - [docs/warp-api-sni-block.md](docs/warp-api-sni-block.md) — разбор ограничения по имени узла
+- [docs/main-core-animation.md](docs/main-core-animation.md) — центральная композиция главного экрана: циферблат, волны и бюджет кадра
 
 ---
 
