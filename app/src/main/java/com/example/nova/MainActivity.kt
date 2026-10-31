@@ -6349,7 +6349,11 @@ class MainActivity : AppCompatActivity() {
         clientData.clearTunnelUiSnapshot()
         connectedUiAwaitingProof = false
         primaryActionPreviewActive = false
-        btnConnect.text = "ОТКЛЮЧИТЬ"
+        // Подпись решает одно правило для всех трёх состояний (подключение,
+        // ожидание доказательства, работа): при переборе точек входа кнопка
+        // останавливает перебор, иначе отключает туннель. Литерал здесь знал
+        // только вторую половину правила и разошёлся бы с ним молча.
+        btnConnect.text = currentPrimaryStopActionLabel()
         setNextProfileVisible(false)
         tunnelIpResolved = false
         currentIpv4 = "..."
@@ -6379,7 +6383,7 @@ class MainActivity : AppCompatActivity() {
         primaryActionPreviewActive = false
         setBackdropConnecting(forceRestart = backdropState != BackdropState.CONNECTING)
         missingVpnSinceMs = 0L
-        btnConnect.text = "ОТКЛЮЧИТЬ"
+        btnConnect.text = currentPrimaryStopActionLabel()
         setNextProfileVisible(false)
         if (!preserveKnownIps) {
             tunnelIpResolved = false
@@ -6450,7 +6454,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
         updateAttemptProgressDisplay()
-        btnConnect.text = "ОТКЛЮЧИТЬ"
+        btnConnect.text = currentPrimaryStopActionLabel()
         applyNextProfileButtonVisibility()
         requestVpnNetwork()
         updateIpDisplay()
