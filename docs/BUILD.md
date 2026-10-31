@@ -13,7 +13,23 @@ cd Nova-Android
 
 Готовый файл: `app/build/outputs/apk/github/debug/`.
 
-На Windows используйте `gradlew.bat`.
+### Windows
+
+В корне проекта лежит `build-apk.bat` — та же сборка, но без набора команд в
+консоли. Скрипт проверяет JDK и Android SDK, зовёт `gradlew.bat` и кладёт готовый
+файл в `out\`.
+
+```
+build-apk.bat                    отладочная сборка github/debug
+build-apk.bat /release           выпуск github/release, нужен keystore.properties
+build-apk.bat /fdroid /release   сборка для каталога F-Droid
+build-apk.bat /clean /install    с очисткой и установкой на телефон через adb
+build-apk.bat /help              все ключи
+```
+
+Запускать можно и двойным щелчком: тогда окно не закроется до нажатия клавиши.
+`/fast` (без R8 и lint) и `/diag` (экран самодиагностики) передают те же флаги
+Gradle, что описаны ниже.
 
 ## Варианты сборки
 
@@ -34,7 +50,7 @@ cd Nova-Android
 | Инструмент | Версия | Зачем |
 | --- | --- | --- |
 | JDK | 17 | сборка Android-проекта |
-| Android SDK | Platform 34 | `compileSdk = 34`, `targetSdk = 34` |
+| Android SDK | Platform 35 | `compileSdk = 35`, `targetSdk = 34` |
 | Gradle | 9.3.1 | ставится сам через wrapper |
 
 Gradle, Android Gradle Plugin 9.1.0 и Kotlin 2.2.10 подтягиваются автоматически, ставить
@@ -46,7 +62,16 @@ Gradle, Android Gradle Plugin 9.1.0 и Kotlin 2.2.10 подтягиваются 
 sdk.dir=/путь/к/Android/Sdk
 ```
 
-Android Studio создаёт его сам при первом открытии проекта.
+На Windows путь записывается с двойными обратными косыми чертами, потому что
+файл читается как Java properties:
+
+```properties
+sdk.dir=C\:\\Users\\имя\\AppData\\Local\\Android\\Sdk
+```
+
+Android Studio создаёт `local.properties` сам при первом открытии проекта, а
+`build-apk.bat` обходится без него: если SDK лежит по стандартному пути, скрипт
+подставляет `ANDROID_HOME` сам.
 
 ## Минимальная версия Android
 
