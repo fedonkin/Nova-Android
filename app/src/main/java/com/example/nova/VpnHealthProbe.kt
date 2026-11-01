@@ -1,5 +1,6 @@
 package com.example.nova
 
+import android.app.ActivityManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.pm.PackageManager
