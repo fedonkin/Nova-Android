@@ -64,25 +64,32 @@
     <!--
         Status Text.
 
-        Отступы — поле под ореол букв (`StrokeTextView.fittedBlurRadius`); нижний
-        вместе с отступом до кнопки держит прежнее расстояние статус — кнопка. Микро-лог стоит над статусом (в горизонтали — колонкой слева),
-        а не между статусом и кнопкой: строки и бегущие точки над кнопкой читались
-        как часть кнопки, а «...» — как сломанный текст.
+        Надпись набрана как гравировка на приборе, а не как вывеска: средняя
+        насыщенность вместо чёрной, широкая разрядка вместо жирного глифа, ровный
+        цвет без свечения и обводки. Ореола больше нет — вместе с ним ушёл и
+        программный слой, в котором жил вид.
+
+        Отступы держат воздух вокруг надписи и расстояние до кнопки; нижний вместе
+        с отступом до кнопки задаёт это расстояние (сверху отступ только
+        уравновешивает блок). Микро-лог стоит над статусом (в горизонтали —
+        колонкой слева), а не между статусом и кнопкой: строки и бегущие точки над
+        кнопкой читались как часть кнопки, а «...» — как сломанный текст.
     -->
-    <com.example.nova.StrokeTextView
+    <com.example.nova.StatusTextView
         android:id="@+id/tvStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
         android:text="НЕ ПОДКЛЮЧЕНО"
         android:textColor="#C62828"
-        android:textSize="16sp"
-        android:fontFamily="sans-serif-black"
-        android:textStyle="bold"
-        android:letterSpacing="0.082"
+        android:textSize="15sp"
+        android:fontFamily="sans-serif-medium"
+        android:letterSpacing="0.18"
+        android:fontFeatureSettings="'tnum'"
+        android:lineSpacingExtra="2dp"
         android:breakStrategy="balanced"
-        android:paddingTop="44dp"
-        android:paddingBottom="60dp"
+        android:paddingTop="28dp"
+        android:paddingBottom="54dp"
         android:layout_marginBottom="48dp"
         app:layout_constraintBottom_toTopOf="@+id/btnConnect"
         app:layout_constraintEnd_toEndOf="parent"
@@ -101,7 +108,7 @@
         android:gravity="center"
         android:paddingStart="24dp"
         android:paddingEnd="24dp"
-        android:layout_marginBottom="30dp"
+        android:layout_marginBottom="32dp"
         android:textColor="#CFE1F2"
         android:alpha="0.82"
         android:textSize="12sp"

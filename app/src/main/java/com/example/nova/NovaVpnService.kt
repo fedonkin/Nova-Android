@@ -168,6 +168,8 @@ class NovaVpnService : OperaNativeVpnService() {
      */
     @Volatile
     private var currentTransportLabel = ""
+    /** Текущий этап подключения; пусто — подключения нет. */
+    private var currentConnectStage = ""
     /**
      * Пояснение для интерфейса, когда работает не выбранный транспорт. Уезжает
      * в файл состояния вместе с состоянием: главный процесс не видит чужие
@@ -732,6 +734,20 @@ class NovaVpnService : OperaNativeVpnService() {
         private const val TUNNEL_STALL_WATCH_INTERVAL_MS = 1_500L
 
         /**
+         * Частота проверок в первые секунды попытки.
+         *
+         * Ни один порог при этом не меняется: «рукопожатие не старше 1200 мс»,
+         * «VPN-сеть появилась в ConnectivityManager», «пора спросить пробу» —
+         * всё остаётся как было. Меняется только частота, с которой они
+         * проверяются: раньше между готовностью туннеля и проверкой стояло до
+         * 800 мс тишины, и ровно столько человек смотрел на «ПОДКЛЮЧЕНИЕ…» над
+         * уже работающим туннелем. Через окно тик возвращается к прежнему:
+         * дальше это наблюдение за сессией, и спешить там некуда.
+         */
+        private const val CONNECT_TICK_BOOST_WINDOW_MS = 4_000L
+        private const val CONNECT_TICK_BOOST_MS = 300L
+
+        /**
          * Пауза, на которую отправляется узел, брошенный из-за пропавшего потока.
          *
          * Замер показал, что тот же узел через полчаса вёз трафик без потерь, —
@@ -1147,6 +1163,18 @@ class NovaVpnService : OperaNativeVpnService() {
         const val STATE_CONNECTED = "CONNECTED"
         const val STATE_STOPPED = "STOPPED"
         const val EXTRA_STATE = "state"
+
+        /**
+         * Этап подключения отдельным сообщением.
+         *
+         * Служба знает этапы точнее экрана: она ставит метку в тот момент, когда
+         * шаг действительно начался, а не когда экран в очередной раз спросил
+         * состояние. Экран подписывает этим надпись статуса («· рукопожатие · 4 с»),
+         * чтобы ожидание перестало быть немым.
+         */
+        const val ACTION_VPN_STAGE = "com.example.nova.VPN_STAGE"
+        const val EXTRA_CONNECT_STAGE = "connect_stage"
+        const val EXTRA_CONNECT_STAGE_ELAPSED_MS = "connect_stage_elapsed_ms"
         const val EXTRA_BACKEND = "backend"
         const val EXTRA_ATTEMPT_ORDINAL = "attempt_ordinal"
         const val EXTRA_ATTEMPT_TOTAL = "attempt_total"
@@ -2309,6 +2337,8 @@ class NovaVpnService : OperaNativeVpnService() {
     }
 
     private fun configureAndStartOperaOnly(regionPreferenceOverride: String?, connectGenerationId: Int) {
+        ConnectTimeline.begin("opera")
+        publishConnectStage("")
         try {
             if (!isConnectGenerationCurrent(connectGenerationId)) {
                 logConnectAbortedBeforeStart("opera-only", connectGenerationId)
@@ -2395,6 +2425,15 @@ class NovaVpnService : OperaNativeVpnService() {
             setCurrentBackend(BACKEND_WARP)
             broadcastState(STATE_STOPPED)
             stopSelf()
+        } finally {
+            if (ConnectTimeline.hasPending()) {
+                val outcome = when {
+                    currentState == STATE_CONNECTED -> "подхвачено"
+                    isUserStopped || explicitStopRequested -> "остановлено"
+                    else -> "не подключено"
+                }
+                ConnectTimeline.finish(outcome)
+            }
         }
     }
     
@@ -2422,6 +2461,27 @@ class NovaVpnService : OperaNativeVpnService() {
         }
     }
 
+    /**
+     * Отмечает этап подключения и одним сообщением говорит о нём экрану.
+     *
+     * Метка для журнала ([ConnectTimeline]) и сообщение для экрана — одно и то же
+     * событие: расходиться им нельзя, иначе на экране был бы один этап, а в журнале
+     * другой. Пустой этап — это отбой: подключения нет либо оно закончилось.
+     *
+     * Сообщение адресное ([setPackage]): слушать его должен только наш процесс.
+     */
+    private fun publishConnectStage(stage: String) {
+        if (stage.isNotBlank()) ConnectTimeline.mark(stage)
+        currentConnectStage = stage
+        val intent = Intent(ACTION_VPN_STAGE).apply {
+            putExtra(EXTRA_CONNECT_STAGE, stage)
+            putExtra(EXTRA_CONNECT_STAGE_ELAPSED_MS, ConnectTimeline.elapsedMsOrNull() ?: 0L)
+            setPackage(packageName)
+        }
+        runCatching { sendBroadcast(intent) }
+            .onFailure { LogManager.log("Не удалось отправить этап подключения ($stage): ${it.message}") }
+    }
+
     private fun broadcastState(state: String) {
         if (explicitStopRequested && state != STATE_STOPPED) {
             return
@@ -2433,12 +2493,15 @@ class NovaVpnService : OperaNativeVpnService() {
         val noticeBeforeChange = currentTransportNotice
         val clientData = ClientData(this)
         if (state == STATE_CONNECTED) {
+            ConnectTimeline.finish("подключено")
+            publishConnectStage("")
             lastStoppedStateCleanupAtMs = 0L
             lastConnectedAtMs = SystemClock.elapsedRealtime()
             connectedHealthProbeFailures = 0
             clientData.clearSoftReapplyPending()
             clientData.clearTransientConnectingPending()
         } else if (state == STATE_STOPPED) {
+            publishConnectStage("")
             connectedHealthProbeFailures = 0
             clientData.clearTransportLatency()
             lastSuccessfulTunnelProbeAtMs = 0L
@@ -2489,6 +2552,9 @@ class NovaVpnService : OperaNativeVpnService() {
         syncLocalAppProxy(reason = "state-$state")
         val intent = Intent(ACTION_VPN_STATE).apply {
             putExtra(EXTRA_STATE, state)
+            // Текущий этап едет и здесь: экран мог не слышать отдельное сообщение
+            // (был свёрнут, слушатель появился позже), а состояние он получает всегда.
+            putExtra(EXTRA_CONNECT_STAGE, currentConnectStage)
             putExtra(EXTRA_BACKEND, currentBackendLabel)
             putExtra(EXTRA_ATTEMPT_ORDINAL, currentAttemptOrdinal)
             putExtra(EXTRA_ATTEMPT_TOTAL, currentAttemptTotal)
@@ -3621,6 +3687,7 @@ class NovaVpnService : OperaNativeVpnService() {
     }
 
     private fun markSuccessfulTunnelProbe() {
+        publishConnectStage(ConnectStageLabel.STAGE_PROBE)
         lastSuccessfulTunnelProbeAtMs = SystemClock.elapsedRealtime()
         val connectivityManager = getSystemService(android.net.ConnectivityManager::class.java)
         val selectedUnderlying = selectUnderlyingNetwork(connectivityManager)
@@ -6340,9 +6407,12 @@ class NovaVpnService : OperaNativeVpnService() {
         connectGenerationId: Int,
     ) {
         try {
+            ConnectTimeline.begin("warp")
+            publishConnectStage("")
             if (!waitForPreviousCleanupIfNeeded(connectGenerationId, "warp-connect")) return
             if (!isConnectGenerationCurrent(connectGenerationId)) return
             if (!ensureFreshTransportState(connectGenerationId, "warp-connect")) return
+            publishConnectStage(ConnectStageLabel.STAGE_TRANSPORT)
             suppressSessionRestore = false
             val clientData = ClientData(this)
             val normalizedReserved = normalizeReservedValue(reserved)
@@ -7776,6 +7846,19 @@ class NovaVpnService : OperaNativeVpnService() {
             setCurrentBackend(BACKEND_WARP)
             broadcastState(STATE_STOPPED)
             stopSelf()
+        } finally {
+            // Успех виден и без нас: строка уходит из broadcastState(CONNECTED).
+            // А вот срыв до CONNECTED раньше не оставлял ничего, хотя разложить
+            // по этапам нужно именно его — где встали, там и резать. Заодно
+            // отмечается подхват готового туннеля: он тоже не проходил этапов.
+            if (ConnectTimeline.hasPending()) {
+                val outcome = when {
+                    currentState == STATE_CONNECTED -> "подхвачено"
+                    isUserStopped || explicitStopRequested -> "остановлено"
+                    else -> "не подключено"
+                }
+                ConnectTimeline.finish(outcome)
+            }
         }
     }
 
@@ -9527,7 +9610,10 @@ class NovaVpnService : OperaNativeVpnService() {
                 LogManager.log("tun2proxy для VLESS завершился. Поднимаем туннель заново.")
                 return VlessSessionResult(VlessSessionOutcome.TUNNEL_GONE, uptimeMs())
             }
-            Thread.sleep(1500L)
+            // Пауза стоит в конце тела, а не в начале: первая проба идёт сразу
+            // после подъёма туннеля. Раньше «жив ли узел» и задержка на экране
+            // появлялись только через полторы секунды после того, как всё уже
+            // работало.
             // Только проба через узел: VALIDATED залипает, а проверка через сеть VPN
             // на tun2proxy проходит всегда — рукопожатие и DNS отвечает он сам (G258).
             // Проба живости и есть замер задержки: запрос идёт наружу через сам узел.
@@ -9555,6 +9641,7 @@ class NovaVpnService : OperaNativeVpnService() {
                     return VlessSessionResult(VlessSessionOutcome.DATA_PLANE_LOST, uptimeMs())
                 }
             }
+            Thread.sleep(1_500L)
         }
         // Цикл прервали снаружи: остановка пользователем или новый цикл подключения.
         // В обоих случаях запасная цепочка не нужна — ей займётся тот, кто прервал.
@@ -13607,6 +13694,7 @@ class NovaVpnService : OperaNativeVpnService() {
                     continue
                 }
                 interfaceDescriptor = freshDescriptor
+                publishConnectStage(ConnectStageLabel.STAGE_INTERFACE)
                 LogManager.log("VPN интерфейс поднят для $currentEndpoint.")
                 attemptDescriptor = freshDescriptor
                 reusableDescriptor = freshDescriptor
@@ -13692,9 +13780,13 @@ class NovaVpnService : OperaNativeVpnService() {
                             vpnNet == null &&
                             vpnNetWaitMs < vpnNetworkWaitLimitMs
                     ) {
+                        // Сначала спрашиваем, потом ждём. Сеть, как правило, уже в
+                        // списке к этому моменту, и полсекунды тишины перед первым
+                        // вопросом были платой ни за что.
+                        vpnNet = resolveCurrentAttemptVpnNetwork()
+                        if (vpnNet != null) break
                         Thread.sleep(500)
                         vpnNetWaitMs += 500
-                        vpnNet = resolveCurrentAttemptVpnNetwork()
                     }
 
                     if (vpnNet == null) {
@@ -13719,6 +13811,11 @@ class NovaVpnService : OperaNativeVpnService() {
                     val maxConnectivityProbeAttempts = attemptBudget.maxConnectivityProbeAttempts
                     val minProbeSpacingMs = attemptBudget.minProbeSpacingMs
 
+                    // Первый проход идёт сразу: рукопожатие нередко уже готово к
+                    // моменту, когда движок вернул управление (VPN интерфейс поднят
+                    // раньше), и тик ожидания был платой ни за что. Ранняя проба
+                    // этим не ускоряется — у неё свой порог по времени попытки.
+                    var firstTick = true
                     while (watchdogActive.get() && !isUserStopped && isConnectGenerationCurrent(connectGenerationId) && externalStopRequested?.invoke() != true) {
                         val watchdogSleepMs = when {
                             fastScanMode -> 350L
@@ -13727,7 +13824,17 @@ class NovaVpnService : OperaNativeVpnService() {
                             isChatAwareWarpMode(transportMode) -> 650L
                             else -> 800L
                         }
-                        Thread.sleep(watchdogSleepMs)
+                        if (firstTick) {
+                            firstTick = false
+                        } else {
+                            // В начале попытки тикаем чаще (см. CONNECT_TICK_BOOST_MS):
+                            // проверки те же, но подтверждение туннеля не ждёт лишний тик.
+                            val youngAttempt =
+                                SystemClock.elapsedRealtime() - attemptStartedAt < CONNECT_TICK_BOOST_WINDOW_MS
+                            Thread.sleep(
+                                if (youngAttempt) minOf(watchdogSleepMs, CONNECT_TICK_BOOST_MS) else watchdogSleepMs
+                            )
+                        }
 
                         if (!isConnected.get() && currentState == STATE_CONNECTED && hasRecentSuccessfulTunnelProbe()) {
                             skipStrategyLearning.set(true)
@@ -13776,6 +13883,7 @@ class NovaVpnService : OperaNativeVpnService() {
                         attemptStartedWallTimeSec = attemptStartedWallTimeSec,
                     ) || hasInboundTraffic(tunnelStats)
                     if (handshakeReady && firstHandshakeAtMs == 0L) {
+                        publishConnectStage(ConnectStageLabel.STAGE_HANDSHAKE)
                         firstHandshakeAtMs = SystemClock.elapsedRealtime()
                     }
                     val attemptElapsedMs = SystemClock.elapsedRealtime() - attemptStartedAt
@@ -14737,7 +14845,9 @@ class NovaVpnService : OperaNativeVpnService() {
                         // вырастал до 1440, и на проводе получалось 1500 — ровно
                         // столько, сколько путь уже не везёт.
                         Nova.setTunnelMtu(currentWarpTunnelMtu.toLong())
+                        publishConnectStage(ConnectStageLabel.STAGE_CORE)
                         Nova.startVPN(tunnelFdForEngine(attemptDescriptor), finalConfig)
+                        publishConnectStage(ConnectStageLabel.STAGE_ENGINE)
                     }
                 } catch (t: Throwable) {
                     attemptFailureReason.compareAndSet(null, "engine_crash")

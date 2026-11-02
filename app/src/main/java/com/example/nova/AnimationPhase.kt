@@ -1,7 +1,9 @@
 package com.example.nova
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
@@ -9,15 +11,6 @@ import kotlin.math.sin
  * ([NovaAnimationClock]), поэтому состояние не хранится в видах: пересоздание вида
  * или возврат из паузы попадают в ту же точку цикла.
  */
-
-/** Фаза цикла в долях [0, 1) по прошедшему времени. Отрицательное время тоже даёт [0, 1). */
-internal object SweepPhase {
-    fun fraction(elapsedSeconds: Double, cycleSeconds: Double): Float {
-        if (cycleSeconds <= 0.0) return 0f
-        val x = elapsedSeconds / cycleSeconds
-        return (x - floor(x)).toFloat()
-    }
-}
 
 /**
  * Погружение фона. Один цикл — приближение вдвое за [CYCLE_SECONDS]; второй слой
@@ -62,5 +55,83 @@ internal object WallBounce {
         val m = ((unfolded % period) + period) % period
         val folded = if (m <= length) m else period - m
         return folded.toFloat()
+    }
+}
+
+/**
+ * Циферблат вокруг кнопки подключения. Держит только то, что можно проверить
+ * без Android: угол головки, дыхание зарева, подсветку рисок под головкой
+ * и появление композиции.
+ *
+ * Все величины считаются от времени, а не от номера кадра: на 24 кадрах в секунду
+ * и на 60 движение одно и то же, а возврат из паузы попадает в ту же точку.
+ */
+internal object CoreDial {
+    /**
+     * Угол головки в градусах [0, 360). Ноль — три часа, рост идёт по часовой
+     * стрелке: так же считает `Canvas.drawArc`, поэтому конвертировать не нужно.
+     */
+    fun headDegrees(elapsedSeconds: Double, revolutionSeconds: Double): Float {
+        if (revolutionSeconds <= 0.0) return 0f
+        val turns = elapsedSeconds / revolutionSeconds
+        return ((turns - floor(turns)) * 360.0).toFloat()
+    }
+
+    /**
+     * Медленное дыхание зарева в долях [0, 1]. Синус, а не пила: у пилы на стыке
+     * цикла виден рывок, и зарево мигает.
+     */
+    fun breath(elapsedSeconds: Double, periodSeconds: Double): Float {
+        if (periodSeconds <= 0.0) return 0f
+        val s = sin(2.0 * PI * elapsedSeconds / periodSeconds)
+        return ((s + 1.0) * 0.5).toFloat().coerceIn(0f, 1f)
+    }
+
+    /**
+     * Насколько риска под головкой подсвечена: [0, 1] с квадратичным спадом.
+     * Углы берутся по кратчайшей дуге, поэтому стык 0/360 не даёт вспышки.
+     *
+     * @param widthDegrees половина ширины зоны подсветки
+     */
+    fun emphasis(tickDegrees: Float, headDegrees: Float, widthDegrees: Float): Float {
+        if (widthDegrees <= 0f) return 0f
+        var delta = abs(tickDegrees - headDegrees) % 360f
+        if (delta > 180f) delta = 360f - delta
+        if (delta >= widthDegrees) return 0f
+        val near = 1f - delta / widthDegrees
+        return (near * near).coerceIn(0f, 1f)
+    }
+
+    /**
+     * Фаза волны в долях [0, 1): сколько она прошла от кнопки до края экрана.
+     *
+     * У каждой волны свой период и своё смещение, поэтому они расходятся не
+     * синхронно и рисунок не повторяется. Считается от времени, а не от номера
+     * кадра: частота кадров не влияет ни на скорость, ни на фазу.
+     */
+    fun bandProgress(elapsedSeconds: Double, cycleSeconds: Double, offset: Float): Float {
+        if (cycleSeconds <= 0.0) return 0f
+        val x = elapsedSeconds / cycleSeconds + offset
+        return (x - floor(x)).toFloat()
+    }
+
+    /**
+     * Радиус фронта в долях полного разлёта: `progress^power`.
+     *
+     * При [power] меньше единицы волна идёт быстро у кнопки и замедляется к
+     * краю — так читается энергия, уходящая в экран. Равномерный ход читается
+     * как метроном.
+     */
+    fun expansion(progress: Float, power: Float = 0.72f): Float =
+        progress.coerceIn(0f, 1f).pow(power)
+
+    /**
+     * Прогресс появления композиции [0, 1] за [durationSeconds] секунд.
+     * Сглаживание по краям: обод не «включается» ступенькой.
+     */
+    fun reveal(secondsSinceStart: Double, durationSeconds: Double): Float {
+        if (durationSeconds <= 0.0) return 1f
+        val x = (secondsSinceStart / durationSeconds).coerceIn(0.0, 1.0).toFloat()
+        return x * x * (3f - 2f * x)
     }
 }

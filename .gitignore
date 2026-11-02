@@ -1,0 +1,11 @@
+# Настройки конкретной машины и ключи подписи: в репозиторий не попадают.
+/local.properties
+/keystore.properties
+
+# Артефакты сборки. build-apk.bat складывает сюда готовый APK.
+/out/
+/.gradle/
+/.kotlin/
+/app/build/
+/nova-core/build/
+/nova-xray/build/

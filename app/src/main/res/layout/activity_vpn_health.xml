@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Экран «Почему VPN не работает».
+
+    Это тот же список, что стоит в README после «Если связь не восстановилась»,
+    но проверенный за человека. Сверху — итог, дальше карточки причин: чем
+    грозит, и кнопка системного экрана, который это снимает. Внизу — то, что
+    проверено и оказалось в порядке: молчание о пройденной проверке читается как
+    «её не было».
+
+    Карточки причин строятся кодом (VpnHealthActivity): их число и кнопки
+    зависят от того, что нашлось, — у вендорной прошивки ограничений два, у
+    чужого VPN одно.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:fillViewport="true"
+    android:paddingLeft="16dp"
+    android:paddingTop="16dp"
+    android:paddingRight="16dp"
+    android:paddingBottom="32dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Почему VPN не работает"
+            android:textColor="?attr/novaAccent"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Проверим, что мешает Nova подключиться или держать туннель: разрешение системы, другой VPN, батарея, экономия трафика, частный DNS и прошивка. Ничего не меняется без вас — только показываем причину и нужный системный экран."
+            android:textColor="?attr/novaTextHint"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="?attr/novaCardBackground"
+            android:orientation="vertical"
+            android:paddingLeft="16dp"
+            android:paddingTop="14dp"
+            android:paddingRight="16dp"
+            android:paddingBottom="14dp">
+
+            <TextView
+                android:id="@+id/tv_health_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Проверяю…"
+                android:textColor="?attr/novaTextTitle"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_health_stamp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text=""
+                android:textColor="?attr/novaTextHint"
+                android:textSize="12sp" />
+
+            <ProgressBar
+                android:id="@+id/pb_health"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:indeterminate="true" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ll_health_findings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+
+        <LinearLayout
+            android:id="@+id/ll_health_passed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="?attr/novaCardBackground"
+            android:orientation="vertical"
+            android:paddingLeft="16dp"
+            android:paddingTop="12dp"
+            android:paddingRight="16dp"
+            android:paddingBottom="12dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Проверено — здесь всё в порядке"
+                android:textColor="?attr/novaTextTitle"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_health_passed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text=""
+                android:textColor="?attr/novaTextHint"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/btn_health_refresh"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="?attr/novaCardBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="Проверить снова"
+                android:textColor="?attr/novaTextTitle"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <Space
+                android:layout_width="8dp"
+                android:layout_height="1dp" />
+
+            <TextView
+                android:id="@+id/btn_health_copy"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="?attr/novaCardBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="Скопировать отчёт"
+                android:textColor="?attr/novaTextTitle"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="Отчёт можно приложить к сообщению в группе: в нём условия проверки, состояние службы и найденные ограничения — без имён приложений, адресов и учётных данных. Каждая проверка также пишется в журнал."
+            android:textColor="?attr/novaTextHint"
+            android:textSize="12sp" />
+    </LinearLayout>
+</ScrollView>

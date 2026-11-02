@@ -29,6 +29,7 @@ class LogsActivity : AppCompatActivity() {
     private lateinit var btnPreview: TextView
     private lateinit var btnCopy: TextView
     private lateinit var btnShare: TextView
+    private lateinit var btnVpnHealth: TextView
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var previewJob: Job? = null
@@ -74,7 +75,8 @@ class LogsActivity : AppCompatActivity() {
         btnPreview = findViewById(R.id.btn_preview_log)
         btnCopy = findViewById(R.id.btn_copy_log)
         btnShare = findViewById(R.id.btn_share_log)
-        TvFocusHelper.install(this, swEnabled, btnPreview, btnCopy, btnShare)
+        btnVpnHealth = findViewById(R.id.btn_vpn_health)
+        TvFocusHelper.install(this, swEnabled, btnPreview, btnCopy, btnShare, btnVpnHealth)
     }
 
     private fun bindListeners() {
@@ -89,6 +91,9 @@ class LogsActivity : AppCompatActivity() {
         btnPreview.setOnClickListener { refreshPreview() }
         btnCopy.setOnClickListener { copyPreview() }
         btnShare.setOnClickListener { sharePreview() }
+        btnVpnHealth.setOnClickListener {
+            startActivity(Intent(this, VpnHealthActivity::class.java))
+        }
     }
 
     private fun loadConfig() {

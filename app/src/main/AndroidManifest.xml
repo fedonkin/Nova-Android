@@ -182,6 +182,18 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.Nova.Settings" />
 
+        <!--
+            «Почему VPN не работает»: проверка ограничений системы. Экран не
+            экспортируется — открывается только изнутри приложения, из настроек
+            и из журнала.
+        -->
+        <activity
+            android:name=".VpnHealthActivity"
+            android:exported="false"
+            android:label="Почему VPN не работает"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Nova.Settings" />
+
         <activity
             android:name=".LogsActivity"
             android:label="Логи"

@@ -144,6 +144,45 @@
             />
     </LinearLayout>
 
+    <!--
+        Журнал показывает, что случилось; этот экран — почему это случилось с
+        системой. Стоит рядом с кнопками отчёта: человек, открывший журнал,
+        обычно уже ищет причину.
+    -->
+    <LinearLayout
+        android:id="@+id/btn_vpn_health"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="12dp"
+        android:background="?attr/novaCardBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Почему VPN не работает"
+            android:textColor="?attr/novaTextTitle"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:drawableStart="@drawable/ic_nova_health"
+            android:drawablePadding="12dp"
+            android:drawableTint="?attr/novaIconTint" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="›"
+            android:textColor="?attr/novaTextTitle"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

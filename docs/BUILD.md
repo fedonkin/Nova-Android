@@ -13,7 +13,45 @@ cd Nova-Android
 
 Готовый файл: `app/build/outputs/apk/github/debug/`.
 
-На Windows используйте `gradlew.bat`.
+### Windows
+
+В корне проекта лежит `build-apk.bat` — та же сборка, но без набора команд в
+консоли. Скрипт проверяет JDK и Android SDK, зовёт `gradlew.bat` и кладёт готовый
+файл в `out\`.
+
+```
+build-apk.bat                    отладочная сборка github/debug
+build-apk.bat /release           выпуск github/release, нужен keystore.properties
+build-apk.bat /fdroid /release   сборка для каталога F-Droid
+build-apk.bat /clean /install    с очисткой и установкой на телефон через adb
+build-apk.bat /help              все ключи
+```
+
+Запускать можно и двойным щелчком. Окно закрывается **только крестиком** `[X]`:
+клавиша его больше не закрывает, поэтому сообщение об ошибке видно столько,
+сколько нужно, и его можно скопировать. Для скриптов и CI есть `/nohold` —
+с ним скрипт завершается и отдаёт код возврата, как обычная команда.
+
+`/fast` (без R8 и lint) и `/diag` (экран самодиагностики) передают те же флаги
+Gradle, что описаны ниже.
+
+Зависимости ставит соседний скрипт `setup-deps.bat`:
+
+```
+setup-deps.bat                   всё нужное в стандартный SDK
+setup-deps.bat /sdk "D:\Android\Sdk"   в свой SDK
+setup-deps.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17.0.20.1-hotspot"
+setup-deps.bat /winget           нет JDK — поставить Temurin 17 через winget
+setup-deps.bat /build            поставить зависимости и сразу собрать
+```
+
+Что он делает: находит JDK 17–25 (или ставит Temurin 17 по `/winget`), создаёт
+папку SDK, если её нет, скачивает официальные Command-line Tools, принимает
+лицензии и ставит `platforms;android-<compileSdk>`, `build-tools`,
+`platform-tools`, `ndk` и `cmake` **тех версий, что зашиты в
+`app/build.gradle.kts`** — версии он читает из файла, а не держит у себя, и
+печатает найденные, чтобы расхождение с проектом было видно сразу. В конце —
+таблица «что стоит / чего нет» и запись `sdk.dir` в `local.properties`.
 
 ## Варианты сборки
 
@@ -33,12 +71,48 @@ cd Nova-Android
 
 | Инструмент | Версия | Зачем |
 | --- | --- | --- |
-| JDK | 17 | сборка Android-проекта |
-| Android SDK | Platform 34 | `compileSdk = 34`, `targetSdk = 34` |
+| JDK | 17 | сборка Android-проекта; 26 и новее не подходят, см. ниже |
+| Android SDK | Platform 35 | `compileSdk = 35`, `targetSdk = 34` |
+| Android SDK Build-Tools | 35.0.0 | упаковка APK |
+| NDK | **27.2.12479018** | JNI-слой tun2proxy из `app/src/main/cpp` (`ndkVersion`) |
+| CMake | **3.22.1** | сборка того же JNI-слоя (`externalNativeBuild`) |
+| platform-tools | любая | `adb`, нужен только для `/install` |
 | Gradle | 9.3.1 | ставится сам через wrapper |
+
+NDK и CMake Android Studio **не ставит по умолчанию**: в `SDK Tools` их нужно
+отметить (и включить `Show Package Details`, чтобы выбрать ровно 27.2.12479018
+и 3.22.1). Версии зашиты в `app/build.gradle.kts`, и NDK 28+, как и CMake 4.x,
+не подойдут — проект соберётся другим инструментом и упадёт на JNI-слое.
+`build-apk.bat` проверяет состав SDK поимённо и печатает, чего именно нет, а
+ставит всё это `setup-deps.bat`. Вручную — так:
+
+```
+sdkmanager "platforms;android-35" "build-tools;35.0.0" ^
+           "ndk;27.2.12479018" "cmake;3.22.1"
+```
+
+Ещё нужна сеть до `dl.google.com` (Google Maven), `repo1.maven.org`,
+`plugins.gradle.org` и `services.gradle.org` — с последнего wrapper скачивает
+сам Gradle 9.3.1, и без него сборка падает до всякого кода.
 
 Gradle, Android Gradle Plugin 9.1.0 и Kotlin 2.2.10 подтягиваются автоматически, ставить
 их отдельно не нужно.
+
+Версия JDK важнее, чем кажется: сам Gradle 9.3.1 запускается только на JDK 17–25
+(JDK 26 требует Gradle 9.4, JDK 27 — 9.8). На более новой JDK сборка падает не с
+понятным «нужен другой Gradle», а на разрешении плагинов:
+
+```
+Plugin [id: 'org.jetbrains.kotlin.android', version: '2.2.10', apply: false] was not found
+```
+
+`build-apk.bat` версию читает и, если `java` в PATH новее 25, ищет на машине
+подходящую JDK (17 или 21 — в том числе `jbr` из Android Studio) и собирает ею.
+
+Скачать JDK 17: https://adoptium.net/temurin/releases/?version=17&os=windows&arch=x64&package=jdk
+(MSI ставит его в `C:\Program Files\Eclipse Adoptium\jdk-17…`, откуда скрипт его и
+находит). Короче — `winget install -e --id EclipseAdoptium.Temurin.17.JDK`.
+Свою JDK можно указать явно: `build-apk.bat /jdk "C:\Program Files\Eclipse Adoptium\jdk-17"`.
 
 Путь к SDK задаётся файлом `local.properties` в корне проекта:
 
@@ -46,7 +120,30 @@ Gradle, Android Gradle Plugin 9.1.0 и Kotlin 2.2.10 подтягиваются 
 sdk.dir=/путь/к/Android/Sdk
 ```
 
-Android Studio создаёт его сам при первом открытии проекта.
+На Windows путь записывается с двойными обратными косыми чертами, потому что
+файл читается как Java properties:
+
+```properties
+sdk.dir=C\:\\Users\\имя\\AppData\\Local\\Android\\Sdk
+```
+
+Android Studio создаёт `local.properties` сам при первом открытии проекта, а
+`build-apk.bat` обходится без него: если SDK лежит по стандартному пути, скрипт
+подставляет `ANDROID_HOME` сам.
+
+## Если сборка ругается
+
+`build-apk.bat` печатает в конце разбор: версию JDK, состав SDK, доступность
+репозиториев и частые причины. Быстрая расшифровка частых сообщений:
+
+| Сообщение | Причина |
+| --- | --- |
+| `Plugin ... was not found` на разрешении плагинов | JDK новее 25. Нужна 17: `winget install -e --id EclipseAdoptium.Temurin.17.JDK` либо `/jdk "путь"` |
+| `NDK not configured` / `No version of NDK matched` | нет NDK 27.2.12479018 (стоит другая версия) |
+| `CMake '3.22.1' was not found` | нет CMake 3.22.1 в SDK |
+| `SDK location not found` | нет `local.properties` и `ANDROID_HOME`, либо SDK не по стандартному пути |
+| `Could not resolve ...` / `Could not GET ...` | нет сети до Google Maven, Maven Central, портала плагинов или `services.gradle.org`; помогает VPN или прокси в `%USERPROFILE%\.gradle\gradle.properties` |
+| `UnsatisfiedLinkError` уже на телефоне | `.so` в `jniLibs` старее, чем AAR ядра — см. «Пересборка Go-ядра» |
 
 ## Минимальная версия Android
 
